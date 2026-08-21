@@ -1,0 +1,18 @@
+{
+  "name": "@papatemporal/amalgam",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local offload stack for frontier-model coding agents: portable PostgreSQL layered memory, llama.cpp caveman compression, graphify code graphs. Zero installs, zero admin, zero cloud.",
+  "type": "module",
+  "bin": {
+    "amalgam": "bin/amalgam.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/papatemporal/amalgam.git"
+  },
+  "license": "MIT"
+}
