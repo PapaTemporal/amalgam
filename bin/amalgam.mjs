@@ -582,7 +582,13 @@ function graphStaleness(repo) {
   let builtAt;
   try { builtAt = fs.statSync(g).mtime; } catch { return null; }
   if (!git(repo, ["rev-parse", "--git-dir"]).ok) return { builtAt, commits: 0, unknown: true };
-  const out = git(repo, ["log", "--since", builtAt.toISOString(), "--oneline"]).out;
+  // Only code changes can invalidate a code graph. Counting doc/config-only
+  // commits would nag for a rebuild that changes nothing.
+  const out = git(repo, [
+    "log", "--since", builtAt.toISOString(), "--oneline", "--",
+    ".", ":(exclude)*.md", ":(exclude)*.txt", ":(exclude).gitignore",
+    ":(exclude)docs/**", ":(exclude)LICENSE*",
+  ]).out;
   return { builtAt, commits: out ? out.split("\n").filter(Boolean).length : 0 };
 }
 
