@@ -18,6 +18,7 @@ import fs from "node:fs";
 import os from "node:os";
 import { ensureLlama, modelInstalled } from "../lib/services.mjs";
 import { open as openDb, ftsQuery, logUsage, DB_PATH } from "../lib/db.mjs";
+import { embed, similarity, toBlob, fromBlob, embeddingsInstalled } from "../lib/embed.mjs";
 
 // Machine-level home: runtimes, model, and data live here (shared by all
 // projects on the machine). The package itself only carries code.
@@ -26,6 +27,43 @@ const LLAMA_URL = process.env.AMALGAM_LLAMA_URL ?? "http://127.0.0.1:8642";
 const SESSION_ID = process.env.AMALGAM_SESSION_ID ?? `s-${new Date().toISOString().slice(0, 10)}`;
 
 const db = () => openDb();
+
+/**
+ * Give any memory that lacks a vector one, in bounded batches so a large
+ * backlog cannot stall a recall. Runs before semantic search; a store written
+ * before embeddings were installed catches up on its own.
+ */
+async function backfillEmbeddings(d, batch = 32) {
+  const missing = [
+    ...d.prepare(`SELECT id, content, context FROM l1_facts WHERE embedding IS NULL LIMIT ?`).all(batch)
+      .map((r) => ({ table: "l1", id: r.id, text: `${r.content} ${r.context}` })),
+    // A scenario doc's path and summary describe it; its full body dilutes the
+    // vector, so only its opening is included.
+    ...d.prepare(`SELECT path, summary, substr(content, 1, 600) AS content FROM l2_scenarios WHERE embedding IS NULL LIMIT ?`).all(batch)
+      .map((r) => ({ table: "l2", id: r.path, text: `${r.path}. ${r.summary}. ${r.content}` })),
+  ];
+  if (missing.length === 0) return 0;
+  const vecs = await embed(missing.map((m) => m.text));
+  if (!vecs) return 0;
+  missing.forEach((m, i) => {
+    if (!vecs[i]) return;
+    if (m.table === "l1") d.prepare(`UPDATE l1_facts SET embedding = ? WHERE id = ?`).run(toBlob(vecs[i]), m.id);
+    else d.prepare(`UPDATE l2_scenarios SET embedding = ? WHERE path = ?`).run(toBlob(vecs[i]), m.id);
+  });
+  return missing.length;
+}
+
+/** Embed one record at write time; silently skipped when unavailable. */
+async function embedRow(table, id, text) {
+  if (!embeddingsInstalled()) return;
+  try {
+    const [v] = (await embed(text)) ?? [];
+    if (!v) return;
+    const d = db();
+    if (table === "l1") d.prepare(`UPDATE l1_facts SET embedding = ? WHERE id = ?`).run(toBlob(v), id);
+    else d.prepare(`UPDATE l2_scenarios SET embedding = ? WHERE path = ?`).run(toBlob(v), id);
+  } catch {}
+}
 
 // ------------------------------------------------------------- llama bridge
 async function llama(system, user, maxTokens = 2048) {
@@ -89,7 +127,7 @@ const TOOLS = [
   {
     name: "memory_recall",
     description:
-      "Search local long-term memory (PostgreSQL full-text, ranked). Returns distilled facts (L1), scenario docs (L2), and optionally raw log lines (L0). Stored content is caveman-dense; read it as-is, it costs few tokens. Use at task start to load context instead of re-asking the user or re-reading files.",
+      "Search local long-term memory by meaning and by keyword (local embeddings + BM25). Finds relevant memories even when your wording shares no words with them. Returns distilled facts (L1), scenario docs (L2), and optionally raw log lines (L0). Stored content is dense; read it as-is, it costs few tokens. Use at task start to load context instead of re-asking the user or re-reading files.",
     inputSchema: {
       type: "object",
       properties: {
@@ -219,39 +257,96 @@ async function handleTool(name, args) {
   switch (name) {
     case "memory_recall": {
       const limit = Math.min(Math.max(args.limit ?? 8, 1), 50);
-      const q = ftsQuery(args.query);
-      if (!q) return "No searchable terms in query.";
       const d = db();
-      const rows = [];
-      for (const r of d.prepare(
-        `SELECT f.id, f.kind, f.context, f.content, bm25(l1_fts) AS rank
-           FROM l1_fts JOIN l1_facts f ON f.id = l1_fts.rowid
-          WHERE l1_fts MATCH ? ORDER BY rank LIMIT ?`).all(q, limit)) {
-        rows.push({ rank: r.rank, line: `[L1:${r.id}] (${r.kind}${r.context ? ` @${r.context}` : ""}) ${r.content}` });
-      }
-      for (const r of d.prepare(
-        `SELECT path, summary, substr(content, 1, 1200) AS content, bm25(l2_fts) AS rank
-           FROM l2_fts WHERE l2_fts MATCH ? ORDER BY rank LIMIT ?`).all(q, limit)) {
-        rows.push({ rank: r.rank, line: `[L2:${r.path}] (scenario${r.summary ? ` @${r.summary}` : ""}) ${r.content}` });
-      }
-      if (args.include_raw) {
+
+      // --- keyword leg (BM25) ---
+      const q = ftsQuery(args.query);
+      const keyword = [];
+      if (q) {
         for (const r of d.prepare(
-          `SELECT g.id, g.role, g.session_id, g.content, bm25(l0_fts) AS rank
-             FROM l0_fts JOIN l0_log g ON g.id = l0_fts.rowid
-            WHERE l0_fts MATCH ? ORDER BY rank LIMIT ?`).all(q, limit)) {
-          rows.push({ rank: r.rank, line: `[L0:${r.id}] (${r.role} @${r.session_id}) ${r.content}` });
+          `SELECT f.id, f.kind, f.context, f.content, bm25(l1_fts) AS rank
+             FROM l1_fts JOIN l1_facts f ON f.id = l1_fts.rowid
+            WHERE l1_fts MATCH ? ORDER BY rank LIMIT ?`).all(q, limit * 2)) {
+          keyword.push({ key: `L1:${r.id}`, line: `[L1:${r.id}] (${r.kind}${r.context ? ` @${r.context}` : ""}) ${r.content}` });
+        }
+        for (const r of d.prepare(
+          `SELECT path, summary, substr(content, 1, 1200) AS content, bm25(l2_fts) AS rank
+             FROM l2_fts WHERE l2_fts MATCH ? ORDER BY rank LIMIT ?`).all(q, limit * 2)) {
+          keyword.push({ key: `L2:${r.path}`, line: `[L2:${r.path}] (scenario${r.summary ? ` @${r.summary}` : ""}) ${r.content}` });
+        }
+        if (args.include_raw) {
+          for (const r of d.prepare(
+            `SELECT g.id, g.role, g.session_id, g.content, bm25(l0_fts) AS rank
+               FROM l0_fts JOIN l0_log g ON g.id = l0_fts.rowid
+              WHERE l0_fts MATCH ? ORDER BY rank LIMIT ?`).all(q, limit * 2)) {
+            keyword.push({ key: `L0:${r.id}`, line: `[L0:${r.id}] (${r.role} @${r.session_id}) ${r.content}` });
+          }
         }
       }
-      if (rows.length === 0) return "No memories matched.";
-      // bm25() returns more-negative for better matches
-      const out = rows.sort((a, b) => a.rank - b.rank).slice(0, limit).map((r) => r.line).join("\n");
+
+      // --- semantic leg (embeddings), when the small model is installed ---
+      let semantic = [];
+      let semanticUsed = false;
+      if (embeddingsInstalled()) {
+        try {
+          await backfillEmbeddings(d);
+          const [qv] = (await embed(args.query, { query: true })) ?? [];
+          if (qv) {
+            semanticUsed = true;
+            const scored = [];
+            for (const r of d.prepare(
+              `SELECT id, kind, context, content, embedding FROM l1_facts WHERE embedding IS NOT NULL`).all()) {
+              scored.push({
+                score: similarity(qv, fromBlob(r.embedding)),
+                key: `L1:${r.id}`,
+                line: `[L1:${r.id}] (${r.kind}${r.context ? ` @${r.context}` : ""}) ${r.content}`,
+              });
+            }
+            for (const r of d.prepare(
+              `SELECT path, summary, substr(content,1,1200) AS content, embedding FROM l2_scenarios WHERE embedding IS NOT NULL`).all()) {
+              scored.push({
+                score: similarity(qv, fromBlob(r.embedding)),
+                key: `L2:${r.path}`,
+                line: `[L2:${r.path}] (scenario${r.summary ? ` @${r.summary}` : ""}) ${r.content}`,
+              });
+            }
+            semantic = scored.sort((a, b) => b.score - a.score).slice(0, limit * 2);
+          }
+        } catch {
+          // Semantic recall is an enhancement; keyword results still stand.
+        }
+      }
+
+      if (keyword.length === 0 && semantic.length === 0) return "No memories matched.";
+
+      // Combining the two legs: cosine similarity is a calibrated score, while
+      // keyword rank is not, so when embeddings are available semantic decides
+      // the order and keyword only contributes candidates semantic missed
+      // (exact identifiers, paths, commands). Rank fusion was tried first and
+      // was worse here: a memory matching one common word landed in both lists
+      // and outranked the correct answer. No tuning constants, which also
+      // means nothing overfitted to a handful of test queries.
+      const seen = new Set();
+      const ordered = [];
+      for (const s of semantic) {
+        if (seen.has(s.key)) continue;
+        seen.add(s.key);
+        ordered.push(s.line);
+      }
+      for (const k of keyword) {
+        if (seen.has(k.key)) continue;
+        seen.add(k.key);
+        ordered.push(k.line);
+      }
+      const out = ordered.slice(0, limit).join("\n");
       logUsage("memory_recall", String(args.query).length, out.length);
-      return out;
+      return semanticUsed ? out : out + "\n\n(keyword search only — install semantic recall with `amalgam install --with-embeddings`)";
     }
     case "memory_save_fact": {
       const info = db().prepare(
         `INSERT INTO l1_facts (kind, content, context, priority) VALUES (?, ?, ?, ?)`
       ).run(args.kind ?? "fact", args.content, args.context ?? "", args.priority ?? 50);
+      await embedRow("l1", info.lastInsertRowid, `${args.content} ${args.context ?? ""}`);
       return `Saved L1 fact id=${info.lastInsertRowid}`;
     }
     case "memory_log": {
@@ -271,6 +366,7 @@ async function handleTool(name, args) {
       d.prepare(`DELETE FROM l2_fts WHERE path = ?`).run(args.path);
       d.prepare(`INSERT INTO l2_fts (path, summary, content) VALUES (?, ?, ?)`)
         .run(args.path, args.summary ?? "", args.content);
+      await embedRow("l2", args.path, `${args.path}. ${args.summary ?? ""}. ${String(args.content).slice(0, 600)}`);
       return `Wrote L2 scenario '${args.path}'.`;
     }
     case "memory_context_read": {

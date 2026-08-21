@@ -55,11 +55,12 @@ The installer tries: release asset via `gh` CLI → release asset via token
 logged in to GitHub): open the release page, download the assets, save them
 to the paths below, then re-run `amalgam install --with-model`:
 
-| Release asset | Save to |
-|---|---|
-| `llama-cpu-x64.zip` (~90 MB) | `~/.amalgam/downloads/llama-cpu-x64.zip` |
-| `Qwen3-4B-Instruct-2507-Q4_K_M-00001-of-00002.gguf` (~1.8 GB) | `~/.amalgam/models/` (same filename) |
-| `Qwen3-4B-Instruct-2507-Q4_K_M-00002-of-00002.gguf` (~0.6 GB) | `~/.amalgam/models/` (same filename) |
+| Release asset | Needed for | Save to |
+|---|---|---|
+| `llama-cpu-x64.zip` (~19 MB) | both | `~/.amalgam/downloads/llama-cpu-x64.zip` |
+| `bge-small-en-v1.5-f32.gguf` (~134 MB) | `--with-embeddings` | `~/.amalgam/models/` (same filename) |
+| `Qwen3-4B-Instruct-2507-Q4_K_M-00001-of-00002.gguf` (~1.8 GB) | `--with-model` | `~/.amalgam/models/` (same filename) |
+| `Qwen3-4B-Instruct-2507-Q4_K_M-00002-of-00002.gguf` (~0.6 GB) | `--with-model` | `~/.amalgam/models/` (same filename) |
 
 The model is a llama.cpp **split GGUF** — download both parts, no
 reassembly; llama-server loads part 1 and finds part 2 itself.
@@ -161,6 +162,31 @@ node bin/amalgam.mjs graph    # build/refresh this repo's code graph
 `amalgam graph` wraps graphify with `--code-only`, which keeps it on its local
 tree-sitter path — the docs/media pass would call a cloud LLM, which this
 stack forbids.
+
+## Semantic recall
+
+With `--with-embeddings` (~153 MB total), memory is searched by **meaning as
+well as by keyword**: a small embedding model (bge-small-en-v1.5, 384 dims)
+runs locally, vectors live in the same SQLite file, and results are ordered by
+cosine similarity with keyword hits appended for exact identifiers.
+
+This is the difference it makes — the query below shares **no content words**
+with the memory that answers it, so keyword search alone returns nothing useful:
+
+```text
+query : "offline setup preference, avoid internet services"
+result: User want all tooling local, portable, no installers, no admin,
+        no cloud. Only network call = frontier model.
+```
+
+Quality is a measurement, not a claim:
+
+```bash
+node tests/recall-eval.mjs     # paraphrase queries -> expected memories
+```
+
+Memories are embedded when written, and any written before embeddings were
+installed are backfilled automatically on the next recall.
 
 ## Does it actually save context?
 

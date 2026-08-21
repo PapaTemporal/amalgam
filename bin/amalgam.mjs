@@ -48,6 +48,8 @@ const MODEL_PARTS = [
 // Memory is SQLite via Node's built-in module: nothing to download for it.
 // Only the optional model path has payloads, and they are skipped unless the
 // user asks for them with --with-model.
+const EMBED_MODEL_FILE = "bge-small-en-v1.5-f32.gguf";
+
 const DOWNLOADS = [
   {
     id: "llama.cpp (portable CPU build)",
@@ -57,8 +59,20 @@ const DOWNLOADS = [
     extractTo: path.join(HOME, "runtime", "llama"),
     check: path.join(HOME, "runtime", "llama", exe("llama-server")),
     winOnly: true,
-    modelOnly: true,
+    // Serves both the embedding model and the generation model.
+    needsRuntime: true,
     approx: "~90 MB",
+  },
+  {
+    id: "bge-small embedding model (semantic recall)",
+    asset: EMBED_MODEL_FILE,
+    url: `https://huggingface.co/CompendiumLabs/bge-small-en-v1.5-gguf/resolve/main/${EMBED_MODEL_FILE}`,
+    mirrors: [`https://hf-mirror.com/CompendiumLabs/bge-small-en-v1.5-gguf/resolve/main/${EMBED_MODEL_FILE}`],
+    archive: path.join(HOME, "models", EMBED_MODEL_FILE),
+    check: path.join(HOME, "models", EMBED_MODEL_FILE),
+    winOnly: false,
+    embedOnly: true,
+    approx: "~134 MB",
   },
   {
     id: "Qwen3-4B model (split 1/2)",
@@ -249,8 +263,11 @@ async function cmdInstall(args) {
   // 2) fetch + extract runtimes/model
   const failed = [];
   const withModel = args.includes("--with-model");
+  const withEmbed = args.includes("--with-embeddings") || withModel;
   for (const d of DOWNLOADS) {
     if (d.modelOnly && !withModel) continue;
+    if (d.embedOnly && !withEmbed) continue;
+    if (d.needsRuntime && !withModel && !withEmbed) continue;
     if (d.winOnly && !WIN) continue;
     if (fs.existsSync(d.check) || (d.altCheck && fs.existsSync(d.altCheck))) {
       console.log(`  [ok] ${d.id} already present`);
@@ -1038,8 +1055,9 @@ switch (cmd) {
     console.log(`amalgam — local offload stack (memory + caveman compression + code graphs)
 
 Usage:
-  amalgam install [--with-model]    set up ~/.amalgam. Memory needs no download;
-                 [--cache <dir>]    --with-model adds the optional local model (~2.5 GB)
+  amalgam install [--with-embeddings] set up ~/.amalgam. Memory needs no download;
+                 [--with-model]     --with-embeddings adds semantic recall (~220 MB);
+                 [--cache <dir>]    --with-model adds digest/caveman too (~2.5 GB)
   amalgam start                     warm the optional model (memory needs no service)
   amalgam stop                      stop the model if running
   amalgam status                    health check
