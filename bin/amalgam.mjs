@@ -612,6 +612,48 @@ function cmdGraph(args) {
   console.log(`\nGraph at ${path.join(target, GRAPH_REL)} — query it with the graph_query MCP tool.`);
 }
 
+// ================================================================ shim
+/**
+ * Write a real `amalgam` command into a directory already on PATH.
+ *
+ * Shell aliases are the usual advice and the usual failure: a PowerShell
+ * function silently drops arguments without `@args`, a doskey macro does the
+ * same without `$*` and does not persist or apply to PowerShell at all. A
+ * launcher file has none of those problems and works from every shell.
+ */
+function cmdShim(args) {
+  const explicit = args.find((a) => !a.startsWith("--"));
+  const cliPath = path.join(PKG, "bin", "amalgam.mjs");
+  const pathDirs = (process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
+  const onPath = (dir) => pathDirs.some((p) => path.resolve(p).toLowerCase() === path.resolve(dir).toLowerCase());
+
+  const candidates = explicit ? [explicit] : WIN
+    ? [path.join(process.env.APPDATA ?? "", "npm"), path.join(os.homedir(), ".local", "bin")]
+    : [path.join(os.homedir(), ".local", "bin"), "/usr/local/bin"];
+  const dir = candidates.find((d) => d && fs.existsSync(d) && onPath(d)) ?? candidates.find((d) => d && fs.existsSync(d)) ?? candidates[0];
+
+  fs.mkdirSync(dir, { recursive: true });
+  const written = [];
+  if (WIN) {
+    const cmd = path.join(dir, "amalgam.cmd");
+    fs.writeFileSync(cmd, `@echo off\r\nnode "${cliPath}" %*\r\n`);
+    written.push(cmd);
+  }
+  // Also write a POSIX launcher: Git Bash and WSL ignore .cmd files.
+  const sh = path.join(dir, "amalgam");
+  fs.writeFileSync(sh, `#!/bin/sh\nexec node "${cliPath.replace(/\\/g, "/")}" "$@"\n`);
+  try { fs.chmodSync(sh, 0o755); } catch {}
+  written.push(sh);
+
+  console.log(`Installed the amalgam command:`);
+  for (const w of written) console.log(`  ${w}`);
+  if (onPath(dir)) console.log(`\n${dir} is already on PATH — open a new shell and run:  amalgam status`);
+  else {
+    console.log(`\n${dir} is NOT on your PATH. Either add it, or re-run pointing at a directory that is:`);
+    console.log(`  amalgam shim <dir-on-your-path>`);
+  }
+}
+
 // ================================================================ brief
 // One fast, dependency-free scan of "where things stand" in a project, so a
 // guided menu can offer concrete choices ("continue story 2.3") instead of
@@ -1054,6 +1096,7 @@ switch (cmd) {
   case "brief": cmdBrief(rest); break;
   case "globalize": cmdGlobalize(rest); break;
   case "graph": cmdGraph(rest); break;
+  case "shim": cmdShim(rest); break;
   default:
     // Distinguish "you typed a command I don't know" from "I received nothing
     // at all". The second usually means a shell wrapper ate the arguments,
@@ -1086,6 +1129,8 @@ Usage:
                                     (--prefix <p>, --keep)
   amalgam stream <sub>              parallel work streams as git worktrees
                                     (new | list | done | gc | drop | pin)
+  amalgam shim [dir]                install a real 'amalgam' command on PATH
+                                    (avoids alias pitfalls entirely)
   amalgam brief [repo]              where things stand: git, streams, BMAD
                                     artifacts, graph, services
   amalgam graph [repo] [--check]    build/refresh a local code graph
