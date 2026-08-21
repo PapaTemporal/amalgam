@@ -89,6 +89,15 @@ node /path/to/amalgam/bin/amalgam.mjs wire --copilot  # VS Code Copilot only
 - **Copilot**: writes `.vscode/mcp.json` (agent-mode MCP) and appends a
   marker-fenced guidance block to `.github/copilot-instructions.md`.
 
+**After wiring, it runs itself.** The SessionStart hook starts PostgreSQL if
+the machine rebooted and injects the offload directives as session context —
+deterministic, unlike skill description matching, and it reaches every
+workflow in the session including BMAD skills, without modifying any of them.
+The MCP server is self-healing: a memory call with PostgreSQL down starts it
+and retries, and `caveman_*` starts llama-server on first use. llama stays
+down until something actually needs it, so idle sessions do not pay its
+~3.6 GB. Day to day you should never need to run `amalgam start` by hand.
+
 Both merge — existing config in those files is preserved.
 
 ## Daily use

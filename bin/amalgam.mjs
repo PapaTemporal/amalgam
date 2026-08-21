@@ -251,7 +251,7 @@ async function cmdInstall(args) {
 
   fs.mkdirSync(HOME, { recursive: true });
   // 1) code payload → HOME (so project wiring never depends on where the repo clone lives)
-  for (const dir of ["mcp", "sql", "skills"]) copyDir(path.join(PKG, dir), path.join(HOME, dir));
+  for (const dir of ["mcp", "sql", "skills", "lib", "hooks"]) copyDir(path.join(PKG, dir), path.join(HOME, dir));
   console.log(`Code payload copied to ${HOME}`);
 
   // 2) fetch + extract runtimes/model
@@ -431,7 +431,26 @@ function cmdWire(args) {
     for (const s of ["offload", "caveman"]) {
       copyDir(path.join(HOME, "skills", s), path.join(proj, ".claude", "skills", s));
     }
-    console.log("Claude Code wired: .mcp.json + .claude/skills/{offload,caveman}");
+    // SessionStart hook: starts PostgreSQL if needed and injects the offload
+    // directives as context. Deterministic, unlike skill matching, and it
+    // covers every workflow in the session (BMAD included) without editing
+    // any of their files.
+    const hookPath = path.join(HOME, "hooks", "session-start.mjs");
+    if (fs.existsSync(hookPath)) {
+      mergeJsonFile(path.join(proj, ".claude", "settings.json"), (o) => {
+        o.hooks ??= {};
+        o.hooks.SessionStart ??= [];
+        const cmd = `node "${hookPath}"`;
+        const already = o.hooks.SessionStart.some((entry) =>
+          (entry.hooks ?? []).some((h) => typeof h.command === "string" && h.command.includes("session-start.mjs"))
+        );
+        if (!already) o.hooks.SessionStart.push({ hooks: [{ type: "command", command: cmd }] });
+      });
+      console.log("Claude Code wired: .mcp.json + .claude/skills/{offload,caveman} + SessionStart hook");
+    } else {
+      console.log("Claude Code wired: .mcp.json + .claude/skills/{offload,caveman}");
+      console.log("  (no hook installed — run 'amalgam install' to refresh the code payload)");
+    }
   }
 
   if (doCopilot) {

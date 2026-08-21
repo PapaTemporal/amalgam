@@ -16,20 +16,37 @@ import path from "node:path";
 import fs from "node:fs";
 
 import os from "node:os";
+import { ensurePg, ensureLlama, pgBin, LLAMA_URL as SVC_LLAMA_URL } from "../lib/services.mjs";
 
 // Machine-level home: runtimes, model, and data live here (shared by all
 // projects on the machine). The package itself only carries code.
 const ROOT = process.env.AMALGAM_HOME ?? path.join(os.homedir(), ".amalgam");
-const PSQL =
-  process.env.AMALGAM_PSQL ??
-  path.join(ROOT, "runtime", "pgsql", "bin", process.platform === "win32" ? "psql.exe" : "psql");
+const PSQL = process.env.AMALGAM_PSQL ?? pgBin("psql");
 const PG_PORT = process.env.AMALGAM_PG_PORT ?? "5455";
 const PG_DB = process.env.AMALGAM_PG_DB ?? "amalgam";
 const LLAMA_URL = process.env.AMALGAM_LLAMA_URL ?? "http://127.0.0.1:8642";
 const SESSION_ID = process.env.AMALGAM_SESSION_ID ?? `s-${new Date().toISOString().slice(0, 10)}`;
 
 // ---------------------------------------------------------------- psql bridge
-function psql(sql, vars = {}) {
+/**
+ * Run SQL, starting PostgreSQL on demand if it is not up. Sessions should
+ * never fail just because the machine rebooted since the last one.
+ */
+async function psql(sql, vars = {}) {
+  try {
+    return await psqlOnce(sql, vars);
+  } catch (e) {
+    if (!/connection to server|could not connect|Connection refused|spawn failed/i.test(e.message)) throw e;
+    if (!ensurePg()) {
+      throw new Error(
+        `PostgreSQL is not running and could not be started from ${ROOT}. Run 'amalgam install' if this machine has no runtime yet, else 'amalgam start'.`
+      );
+    }
+    return await psqlOnce(sql, vars);
+  }
+}
+
+function psqlOnce(sql, vars = {}) {
   return new Promise((resolve, reject) => {
     // SQL goes via stdin, not -c: psql only interpolates :'var' variables
     // when reading from stdin/file, never inside -c command strings.
@@ -51,6 +68,13 @@ function psql(sql, vars = {}) {
 
 // ------------------------------------------------------------- llama bridge
 async function llama(system, user, maxTokens = 2048) {
+  // Lazy start: the model holds ~3.6 GB, so it loads on first actual use
+  // rather than at session start. First call after a reboot pays the load.
+  if (!(await ensureLlama())) {
+    throw new Error(
+      `Local model could not be started (expected llama-server + model under ${ROOT}). Run 'amalgam install' if this machine has no runtime yet.`
+    );
+  }
   let res;
   try {
     res = await fetch(`${LLAMA_URL}/v1/chat/completions`, {
