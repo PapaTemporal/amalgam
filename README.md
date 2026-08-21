@@ -73,8 +73,8 @@ arguments at all and you get the usage screen.
 
 | | Drops arguments | Works |
 |---|---|---|
-| PowerShell | `function amalgam { node ...malgam.mjs }` | `function amalgam { node ...malgam.mjs @args }` |
-| cmd `doskey` | `doskey amalgam=node ...malgam.mjs` | `doskey amalgam=node ...malgam.mjs $*` |
+| PowerShell | `function amalgam { node .../amalgam.mjs }` | `function amalgam { node .../amalgam.mjs @args }` |
+| cmd `doskey` | `doskey amalgam=node .../amalgam.mjs` | `doskey amalgam=node .../amalgam.mjs $*` |
 
 `Set-Alias` cannot forward arguments at all, and a `doskey` macro lasts only
 for the session that defined it and never applies to PowerShell. Adding `bin/`
