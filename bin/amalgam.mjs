@@ -28,9 +28,28 @@ const MODEL_FILE = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf";
 // ------------------------------------------------------------- download plan
 // Pinned versions (validated 2026-08). `check` = path that proves the piece
 // is already present; `archive` = where the raw download is cached.
+//
+// Every file is also published as a GitHub release asset on this repo, so a
+// machine that can reach github.com needs nothing else. Fetch order per file:
+//   1. release asset via gh CLI (if a gh binary is available and authed)
+//   2. release asset via curl + token (AMALGAM_GITHUB_TOKEN or GITHUB_TOKEN)
+//   3. external URL + mirrors via plain curl (public hosts)
+//   4. manual: the browser instructions printed on failure (assets download
+//      fine from the release page in a logged-in browser)
+const RELEASE = { repo: "PapaTemporal/amalgam", tag: "v0.1.0" };
+const RELEASE_PAGE = `https://github.com/${RELEASE.repo}/releases/tag/${RELEASE.tag}`;
+// The model ships as a llama.cpp split GGUF (each part under GitHub's 2 GiB
+// asset cap). llama-server loads part 1 and pulls the rest automatically —
+// no reassembly needed. A machine may instead have the original single file.
+const MODEL_PARTS = [
+  "Qwen3-4B-Instruct-2507-Q4_K_M-00001-of-00002.gguf",
+  "Qwen3-4B-Instruct-2507-Q4_K_M-00002-of-00002.gguf",
+];
+
 const DOWNLOADS = [
   {
     id: "llama.cpp (portable CPU build)",
+    asset: "llama-cpu-x64.zip",
     url: "https://github.com/ggml-org/llama.cpp/releases/download/b10532/llama-b10532-bin-win-cpu-x64.zip",
     archive: path.join(HOME, "downloads", "llama-cpu-x64.zip"),
     extractTo: path.join(HOME, "runtime", "llama"),
@@ -40,6 +59,7 @@ const DOWNLOADS = [
   },
   {
     id: "PostgreSQL 17.5 (portable binaries)",
+    asset: "postgresql-17.5-1-windows-x64-binaries.zip",
     url: "https://get.enterprisedb.com/postgresql/postgresql-17.5-1-windows-x64-binaries.zip",
     archive: path.join(HOME, "downloads", "postgresql-17.5-1-windows-x64-binaries.zip"),
     extractTo: path.join(HOME, "runtime"), // zip contains pgsql/
@@ -48,42 +68,125 @@ const DOWNLOADS = [
     approx: "~300 MB",
   },
   {
-    id: "Qwen3-4B-Instruct GGUF model",
-    url: `https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/${MODEL_FILE}`,
-    // Tried in order when the primary fails (e.g. proxies that block huggingface.co).
-    mirrors: [`https://hf-mirror.com/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/${MODEL_FILE}`],
-    archive: path.join(HOME, "models", MODEL_FILE), // no extraction
-    check: path.join(HOME, "models", MODEL_FILE),
+    id: "Qwen3-4B model (split 1/2)",
+    asset: MODEL_PARTS[0],
+    archive: path.join(HOME, "models", MODEL_PARTS[0]),
+    check: path.join(HOME, "models", MODEL_PARTS[0]),
+    // present if the original single-file model exists instead
+    altCheck: path.join(HOME, "models", MODEL_FILE),
     winOnly: false,
-    approx: "~2.4 GB",
+    approx: "~1.8 GB",
+  },
+  {
+    id: "Qwen3-4B model (split 2/2)",
+    asset: MODEL_PARTS[1],
+    archive: path.join(HOME, "models", MODEL_PARTS[1]),
+    check: path.join(HOME, "models", MODEL_PARTS[1]),
+    altCheck: path.join(HOME, "models", MODEL_FILE),
+    winOnly: false,
+    approx: "~0.6 GB",
   },
 ];
+
+// If the release is unreachable, the model can still come from HF/mirror as
+// the original single file (used only when both split parts are missing).
+const MODEL_SINGLE_FALLBACK = {
+  id: "Qwen3-4B-Instruct GGUF model (single file)",
+  url: `https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/${MODEL_FILE}`,
+  mirrors: [`https://hf-mirror.com/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/${MODEL_FILE}`],
+  archive: path.join(HOME, "models", MODEL_FILE),
+  approx: "~2.4 GB",
+};
 
 function manualHelp(items) {
   const lines = [
     "",
     "================= MANUAL DOWNLOAD (proxy fallback) =================",
     "Automatic download failed (common behind corporate proxies).",
-    "Fetch each file below in a browser / by other means, place it at the",
-    "listed destination, then re-run:  amalgam install",
+    "",
+    "EASIEST — use your web browser (works for the private repo while you",
+    "are logged in to GitHub):",
+    `  1. Open  ${RELEASE_PAGE}`,
+    "  2. Download the assets listed below",
+    "  3. Save each one to its destination path",
+    "  4. Re-run:  amalgam install",
     "",
   ];
   for (const d of items) {
     lines.push(`  ${d.id}  (${d.approx})`);
-    lines.push(`    URL : ${d.url}`);
-    for (const m of d.mirrors ?? []) lines.push(`    Mirror: ${m}`);
-    lines.push(`    Save to: ${d.archive}`);
+    if (d.asset) lines.push(`    Release asset: ${d.asset}`);
+    if (d.url) lines.push(`    External URL : ${d.url}`);
+    for (const m of d.mirrors ?? []) lines.push(`    Mirror       : ${m}`);
+    lines.push(`    Save to      : ${d.archive}`);
     lines.push("");
   }
+  lines.push("The model alternative: instead of the two split parts you may fetch the");
+  lines.push(`single file from the External URL/Mirror above and save it to`);
+  lines.push(`${MODEL_SINGLE_FALLBACK.archive} — either form works.`);
   lines.push("curl honors HTTP_PROXY / HTTPS_PROXY env vars if your proxy allows CLI traffic.");
   lines.push("====================================================================");
   return lines.join("\n");
 }
 
+function findGh() {
+  for (const cand of ["gh", path.join(HOME, "tools", "gh", "bin", exe("gh"))]) {
+    const r = spawnSync(cand, ["--version"], { stdio: "ignore" });
+    if (r.status === 0) return cand;
+  }
+  return null;
+}
+
+function downloadReleaseAsset(assetName, dest) {
+  const tmpDir = path.join(path.dirname(dest), ".asset-tmp");
+  // 1) gh CLI
+  const gh = findGh();
+  if (gh) {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.mkdirSync(tmpDir, { recursive: true });
+    const r = spawnSync(gh, ["release", "download", RELEASE.tag, "-R", RELEASE.repo, "-p", assetName, "-D", tmpDir],
+      { stdio: ["ignore", "inherit", "inherit"] });
+    const got = path.join(tmpDir, assetName);
+    if (r.status === 0 && fs.existsSync(got)) {
+      fs.renameSync(got, dest);
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+      return true;
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+  // 2) token (works without gh; set AMALGAM_GITHUB_TOKEN or GITHUB_TOKEN)
+  const token = process.env.AMALGAM_GITHUB_TOKEN || process.env.GITHUB_TOKEN;
+  if (token) {
+    try {
+      const relUrl = `https://api.github.com/repos/${RELEASE.repo}/releases/tags/${RELEASE.tag}`;
+      const relRes = spawnSync("curl", ["-sL", "--fail", "-H", `Authorization: Bearer ${token}`, relUrl], { encoding: "utf8" });
+      if (relRes.status === 0) {
+        const rel = JSON.parse(relRes.stdout);
+        const asset = (rel.assets ?? []).find((a) => a.name === assetName);
+        if (asset) {
+          const tmp = dest + ".part";
+          const r = spawnSync("curl", ["-L", "--fail", "--retry", "2",
+            "-H", `Authorization: Bearer ${token}`, "-H", "Accept: application/octet-stream",
+            "-o", tmp, asset.url], { stdio: ["ignore", "inherit", "inherit"] });
+          if (r.status === 0) {
+            fs.renameSync(tmp, dest);
+            return true;
+          }
+          try { fs.rmSync(tmp, { force: true }); } catch {}
+        }
+      }
+    } catch {}
+  }
+  return false;
+}
+
 function download(d) {
   fs.mkdirSync(path.dirname(d.archive), { recursive: true });
+  if (d.asset) {
+    console.log(`  fetching ${d.id} ${d.approx} from release ${RELEASE.tag} ...`);
+    if (downloadReleaseAsset(d.asset, d.archive)) return true;
+  }
   const tmp = d.archive + ".part";
-  for (const url of [d.url, ...(d.mirrors ?? [])]) {
+  for (const url of [d.url, ...(d.mirrors ?? [])].filter(Boolean)) {
     console.log(`  downloading ${d.id} ${d.approx} from ${new URL(url).host} ...`);
     const r = spawnSync("curl", ["-L", "--fail", "--retry", "2", "-o", tmp, url], {
       stdio: ["ignore", "inherit", "inherit"],
@@ -145,7 +248,7 @@ async function cmdInstall(args) {
   const failed = [];
   for (const d of DOWNLOADS) {
     if (d.winOnly && !WIN) continue;
-    if (fs.existsSync(d.check)) {
+    if (fs.existsSync(d.check) || (d.altCheck && fs.existsSync(d.altCheck))) {
       console.log(`  [ok] ${d.id} already present`);
       continue;
     }
@@ -169,6 +272,15 @@ async function cmdInstall(args) {
         console.error(`  extraction failed for ${d.archive}`);
         failed.push(d);
       }
+    }
+  }
+  // Model rescue: if only the split parts failed (release unreachable), try
+  // the original single file from the public HF host/mirror instead.
+  const failedParts = failed.filter((d) => MODEL_PARTS.includes(d.asset));
+  if (failedParts.length > 0 && !fs.existsSync(MODEL_SINGLE_FALLBACK.archive)) {
+    console.log("Release unreachable for model parts — trying single-file fallback ...");
+    if (download(MODEL_SINGLE_FALLBACK)) {
+      for (const d of failedParts) failed.splice(failed.indexOf(d), 1);
     }
   }
   if (failed.length) {
@@ -218,9 +330,19 @@ async function cmdStart() {
     console.log("llama-server already running.");
   } else {
     console.log(`Starting llama-server on 127.0.0.1:${LLAMA_PORT} (CPU) ...`);
+    // Model may exist as the original single file or as a llama.cpp split
+    // GGUF (release-asset form). llama-server loads the rest of a split
+    // automatically when pointed at part 1.
+    const singleModel = path.join(HOME, "models", MODEL_FILE);
+    const splitModel = path.join(HOME, "models", MODEL_PARTS[0]);
+    const modelPath = fs.existsSync(singleModel) ? singleModel : splitModel;
+    if (!fs.existsSync(modelPath)) {
+      console.error(`No model found in ${path.join(HOME, "models")} — run 'amalgam install' first.`);
+      process.exit(1);
+    }
     const child = spawn(
       path.join(HOME, "runtime", "llama", exe("llama-server")),
-      ["-m", path.join(HOME, "models", MODEL_FILE), "--host", "127.0.0.1", "--port", LLAMA_PORT, "-c", "8192", "--threads", String(Math.max(2, os.cpus().length - 2))],
+      ["-m", modelPath, "--host", "127.0.0.1", "--port", LLAMA_PORT, "-c", "8192", "--threads", String(Math.max(2, os.cpus().length - 2))],
       { detached: true, stdio: "ignore", windowsHide: true }
     );
     child.unref();

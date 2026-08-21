@@ -38,27 +38,42 @@ node bin/amalgam.mjs start       # starts PostgreSQL + llama-server
 Optionally put `bin/` on PATH or use `npx github:papatemporal/amalgam` (works
 with your git credentials; repo can stay private).
 
-### Behind a proxy?
+### Behind a proxy? Everything is on the release page.
 
-`install` downloads with system `curl`, which honors `HTTP_PROXY` /
-`HTTPS_PROXY`. If a download still fails, the installer prints this manual
-list — fetch each file by hand, place it at the destination, re-run `install`:
+Every runtime and the model are published as **release assets on this repo**
+(see [Releases](https://github.com/PapaTemporal/amalgam/releases)), so a
+machine that can reach github.com needs no other host. The installer tries,
+in order: release asset via `gh` CLI → release asset via token
+(`AMALGAM_GITHUB_TOKEN` or `GITHUB_TOKEN` env var) → the external URLs below
+via `curl` (which honors `HTTP_PROXY`/`HTTPS_PROXY`).
 
-| File | URL | Save to |
-|---|---|---|
-| llama.cpp CPU build (~90 MB) | <https://github.com/ggml-org/llama.cpp/releases/download/b10532/llama-b10532-bin-win-cpu-x64.zip> | `~/.amalgam/downloads/llama-cpu-x64.zip` |
-| PostgreSQL 17.5 portable (~300 MB) | <https://get.enterprisedb.com/postgresql/postgresql-17.5-1-windows-x64-binaries.zip> | `~/.amalgam/downloads/postgresql-17.5-1-windows-x64-binaries.zip` |
-| Qwen3-4B-Instruct Q4_K_M (~2.4 GB) | <https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf> | `~/.amalgam/models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf` |
+**No gh, no token? Use your browser** (works for this private repo while
+logged in to GitHub): open the release page, download the assets, save them
+to the paths below, then re-run `amalgam install`:
 
-**huggingface.co blocked?** The installer automatically falls back to the
-mirror <https://hf-mirror.com> (same URL path, different domain). It also
-works manually: swap `huggingface.co` for `hf-mirror.com` in the model URL
-above.
+| Release asset | Save to |
+|---|---|
+| `llama-cpu-x64.zip` (~90 MB) | `~/.amalgam/downloads/llama-cpu-x64.zip` |
+| `postgresql-17.5-1-windows-x64-binaries.zip` (~300 MB) | `~/.amalgam/downloads/postgresql-17.5-1-windows-x64-binaries.zip` |
+| `Qwen3-4B-Instruct-2507-Q4_K_M-00001-of-00002.gguf` (~1.8 GB) | `~/.amalgam/models/` (same filename) |
+| `Qwen3-4B-Instruct-2507-Q4_K_M-00002-of-00002.gguf` (~0.6 GB) | `~/.amalgam/models/` (same filename) |
+
+The model is a llama.cpp **split GGUF** — download both parts, no
+reassembly; llama-server loads part 1 and finds part 2 itself.
+
+External fallbacks (public hosts, used automatically when the release is
+unreachable): llama.cpp from
+<https://github.com/ggml-org/llama.cpp/releases> (tag b10532), PostgreSQL
+from <https://get.enterprisedb.com/postgresql/>, and the model as a single
+file from
+<https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf>
+(mirror: swap `huggingface.co` for `hf-mirror.com`) saved to
+`~/.amalgam/models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf` — the single file
+works exactly like the split pair.
 
 Already have the files on another machine? Copy them over and pass
 `--cache <dir>`, or drop them straight into the destinations above — the
-most proxy-proof option of all. (This machine keeps copies in
-`~/.amalgam/downloads/` and `~/.amalgam/models/` for exactly that.)
+most proxy-proof option of all.
 
 ## Wire a project (per project)
 
