@@ -314,6 +314,7 @@ async function cmdInstall(args) {
 
   // Memory needs no initialization step: the SQLite file and its schema are
   // created on first use by lib/db.mjs.
+  writeStamp();
   console.log("\nInstall complete. Next, in each project:  amalgam wire");
   if (!modelInstalled()) {
     console.log("(The optional local model was not installed. `digest` and `caveman_*`");
@@ -462,6 +463,7 @@ function wireUser() {
     o.mcpServers.amalgam = { command: "node", args: [serverPath] };
   });
   console.log(`MCP server -> ${USER_MCP_CONFIG} (mcpServers.amalgam)`);
+  recordWiredUser();
   console.log("\nUser-scope wiring done — applies to every project on this machine.");
   console.log("Takes effect in new sessions.");
 }
@@ -506,6 +508,7 @@ function cmdGlobalize(args) {
 
 function cmdWire(args) {
   if (args.includes("--user") || args.includes("--global")) return wireUser();
+  recordWiredProject(process.cwd());
   const doClaude = args.includes("--claude") || (!args.includes("--copilot"));
   const doCopilot = args.includes("--copilot") || (!args.includes("--claude"));
   const proj = process.cwd();
@@ -589,41 +592,170 @@ function graphStaleness(repo) {
   return { builtAt, commits: out ? out.split("\n").filter(Boolean).length : 0 };
 }
 
-function cmdGraph(args) {
-  const target = path.resolve(args.find((a) => !a.startsWith("--")) ?? process.cwd());
-  if (!fs.existsSync(target)) {
-    console.error(`No such directory: ${target}`);
-    process.exit(1);
-  }
-  if (args.includes("--check")) {
-    const s = graphStaleness(target);
-    if (!s) console.log(`no graph in ${target} — build one with: amalgam graph ${target}`);
-    else console.log(`graph built ${s.builtAt.toISOString().slice(0, 10)}, ${s.commits} commit(s) since${s.commits > 0 ? " — consider refreshing" : ""}`);
-    return;
-  }
-  // A graph belongs to one service. Run from a workspace root it would index
-  // every service plus whatever tooling sits beside them, which is slow and
-  // produces a graph too mixed to answer anything well.
-  const services = findServices(target);
-  const isRepo = git(target, ["rev-parse", "--git-dir"]).ok;
-  if (!isRepo && services.length >= 2 && !args.includes("--force")) {
-    console.error(`${target} looks like a workspace, not a service.`);
-    console.error("Graphs are per service. Build them one at a time:\n");
-    for (const s of services) console.error(`  amalgam graph ${s.path}`);
-    console.error("\nOr cd into a service and run `amalgam graph`.");
-    console.error("Pass --force to graph this directory anyway.");
-    process.exit(1);
-  }
-
-  console.log(`Building code graph for ${target} (tree-sitter, local, no LLM) ...`);
+function buildOneGraph(dir) {
+  console.log(`\n=== ${path.basename(dir)} — building code graph (tree-sitter, local, no LLM)`);
   const r = spawnSync("uv", ["tool", "run", "--from", "graphifyy", "graphify", ".", "--code-only"], {
-    cwd: target, stdio: ["ignore", "inherit", "inherit"],
+    cwd: dir, stdio: ["ignore", "inherit", "inherit"],
   });
   if (r.status !== 0) {
-    console.error("graphify failed. Is uv installed? (https://docs.astral.sh/uv/)");
-    process.exit(1);
+    console.error(`  failed for ${dir}. Is uv installed? (https://docs.astral.sh/uv/)`);
+    return false;
   }
-  console.log(`\nGraph at ${path.join(target, GRAPH_REL)} — query it with the graph_query MCP tool.`);
+  console.log(`  graph -> ${path.join(dir, GRAPH_REL)}`);
+  return true;
+}
+
+function reportStaleness(dir, label = dir) {
+  const s = graphStaleness(dir);
+  if (!s) console.log(`  ${label}: no graph — build with \`amalgam graph\``);
+  else if (s.commits > 0) console.log(`  ${label}: built ${s.builtAt.toISOString().slice(0, 10)}, ${s.commits} code commit(s) since — refresh`);
+  else console.log(`  ${label}: current (built ${s.builtAt.toISOString().slice(0, 10)})`);
+}
+
+/**
+ * Graphs are per service, but a workspace usually wants all of them, so that
+ * is the default: run bare in a workspace and every service is graphed in
+ * turn, each keeping its own graph. Naming a directory explicitly always means
+ * exactly that directory.
+ */
+function cmdGraph(args) {
+  const dirIdx = args.indexOf("--directory");
+  const explicit = dirIdx >= 0 ? args[dirIdx + 1] : args.find((a) => !a.startsWith("--"));
+  const check = args.includes("--check");
+  const includeNonGit = args.includes("--all");
+  const cwd = path.resolve(process.cwd());
+
+  // An explicit path is taken literally — no workspace expansion.
+  if (explicit) {
+    const target = path.resolve(explicit);
+    if (!fs.existsSync(target)) {
+      console.error(`No such directory: ${target}`);
+      process.exit(1);
+    }
+    if (check) return reportStaleness(target, path.basename(target));
+    if (!buildOneGraph(target)) process.exit(1);
+    return;
+  }
+
+  const services = findServices(cwd);
+  const isRepo = git(cwd, ["rev-parse", "--git-dir"]).ok;
+  const isWorkspace = !isRepo && services.length >= 2;
+
+  if (!isWorkspace) {
+    if (check) return reportStaleness(cwd, path.basename(cwd));
+    if (!buildOneGraph(cwd)) process.exit(1);
+    return;
+  }
+
+  // Workspace: every service, each with its own graph. Directories not under
+  // version control are skipped by default — they are usually vendored tools
+  // or downloads rather than code being worked on.
+  const targets = services.filter((s) => s.isGit || includeNonGit);
+  const skipped = services.filter((s) => !s.isGit && !includeNonGit);
+
+  if (check) {
+    console.log(`workspace ${cwd} — ${targets.length} service(s)`);
+    for (const s of targets) reportStaleness(s.path, s.name);
+    if (skipped.length) console.log(`  (skipped, not git repos: ${skipped.map((s) => s.name).join(", ")} — include with --all)`);
+    return;
+  }
+
+  console.log(`workspace ${cwd} — graphing ${targets.length} service(s)`);
+  if (skipped.length) console.log(`skipping (not git repos): ${skipped.map((s) => s.name).join(", ")}   include with --all`);
+  let failures = 0;
+  for (const s of targets) if (!buildOneGraph(s.path)) failures++;
+  console.log(`\n${targets.length - failures}/${targets.length} graph(s) built. Query them with the graph_query MCP tool.`);
+  if (failures) process.exit(1);
+}
+
+// ================================================================ version / update
+// The code the agent actually runs is a COPY under AMALGAM_HOME, and the
+// skills are copies again under ~/.claude and each wired project. Pulling the
+// repo therefore updates nothing by itself, so installs are stamped and
+// `update` re-deploys every copy.
+
+const STAMP = path.join(HOME, "installed.json");
+const WIRED = path.join(HOME, "wired.json");
+
+function pkgVersion() {
+  try { return JSON.parse(fs.readFileSync(path.join(PKG, "package.json"), "utf8")).version; } catch { return "unknown"; }
+}
+function pkgCommit() {
+  const r = git(PKG, ["rev-parse", "--short", "HEAD"]);
+  return r.ok ? r.out : null;
+}
+function readJson(f, fallback) {
+  try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch { return fallback; }
+}
+function writeStamp() {
+  fs.mkdirSync(HOME, { recursive: true });
+  fs.writeFileSync(STAMP, JSON.stringify({
+    version: pkgVersion(), commit: pkgCommit(), source: PKG, installedAt: new Date().toISOString(),
+  }, null, 2) + "\n");
+}
+/** Remember which projects were wired, so an update can refresh their copies. */
+function recordWiredProject(dir) {
+  const w = readJson(WIRED, { user: false, projects: [] });
+  if (!w.projects.includes(dir)) w.projects.push(dir);
+  fs.mkdirSync(HOME, { recursive: true });
+  fs.writeFileSync(WIRED, JSON.stringify(w, null, 2) + "\n");
+}
+function recordWiredUser() {
+  const w = readJson(WIRED, { user: false, projects: [] });
+  w.user = true;
+  fs.mkdirSync(HOME, { recursive: true });
+  fs.writeFileSync(WIRED, JSON.stringify(w, null, 2) + "\n");
+}
+
+function cmdVersion() {
+  const stamp = readJson(STAMP, null);
+  const commit = pkgCommit();
+  console.log(`amalgam ${pkgVersion()}${commit ? ` (${commit})` : ""}`);
+  console.log(`source   : ${PKG}${commit ? "" : "  (not a git clone — installed via npx?)"}`);
+  if (!stamp) {
+    console.log(`installed: nothing deployed yet — run \`amalgam install\``);
+    return;
+  }
+  console.log(`installed: ${stamp.version}${stamp.commit ? ` (${stamp.commit})` : ""} on ${stamp.installedAt.slice(0, 10)} -> ${HOME}`);
+  if (commit && stamp.commit && commit !== stamp.commit) {
+    console.log(`\nThe deployed copy is behind this source. Run: amalgam update`);
+  }
+}
+
+async function cmdUpdate(args) {
+  const commitBefore = pkgCommit();
+  if (commitBefore && !args.includes("--no-pull")) {
+    const dirty = git(PKG, ["status", "--porcelain"]).out;
+    if (dirty) {
+      console.log("Local changes present in the source clone — skipping git pull.");
+    } else {
+      console.log("Pulling latest source ...");
+      const r = git(PKG, ["pull", "--ff-only"]);
+      console.log(r.ok ? `  ${r.out.split("\n")[0]}` : `  pull failed: ${r.err.split("\n")[0]}`);
+    }
+  } else if (!commitBefore) {
+    console.log("This is not a git clone, so there is nothing to pull.");
+    console.log("If you installed with npx, re-run the npx command to fetch the latest.");
+  }
+
+  // Re-deploy the code payload, then refresh every copy that was wired.
+  console.log("\nRe-deploying code payload ...");
+  await cmdInstall(args.filter((a) => a !== "--no-pull"));
+
+  const w = readJson(WIRED, { user: false, projects: [] });
+  if (w.user) {
+    console.log("\nRefreshing user-scope wiring ...");
+    wireUser();
+  }
+  for (const proj of w.projects) {
+    if (!fs.existsSync(proj)) continue;
+    console.log(`\nRefreshing project wiring: ${proj}`);
+    for (const s of ["offload", "caveman", "start"]) {
+      copyDir(path.join(HOME, "skills", s), path.join(proj, ".claude", "skills", s));
+    }
+  }
+  console.log(`\nUpdate complete — now at ${pkgVersion()}${pkgCommit() ? ` (${pkgCommit()})` : ""}.`);
+  console.log("Restart any open agent session to pick up new skills, hooks, and MCP tools.");
 }
 
 // ================================================================ shim
@@ -1111,6 +1243,8 @@ switch (cmd) {
   case "globalize": cmdGlobalize(rest); break;
   case "graph": cmdGraph(rest); break;
   case "shim": cmdShim(rest); break;
+  case "version": case "--version": case "-v": cmdVersion(); break;
+  case "update": await cmdUpdate(rest); break;
   default:
     // Distinguish "you typed a command I don't know" from "I received nothing
     // at all". The second usually means a shell wrapper ate the arguments,
@@ -1134,6 +1268,8 @@ Usage:
   amalgam start                     warm the optional model (memory needs no service)
   amalgam stop                      stop the model if running
   amalgam status                    health check
+  amalgam version                   what is deployed vs. what this source has
+  amalgam update                    pull, re-deploy, and refresh every wired copy
   amalgam stats                     measured tool usage — is any of this earning its keep?
   amalgam wire [--claude|--copilot] wire the current project (default: both)
   amalgam wire --user               wire once for EVERY project on this machine
@@ -1147,8 +1283,11 @@ Usage:
                                     (avoids alias pitfalls entirely)
   amalgam brief [repo]              where things stand: git, streams, BMAD
                                     artifacts, graph, services
-  amalgam graph [repo] [--check]    build/refresh a local code graph
-                                    (--check reports staleness only)
+  amalgam graph [--check] [--all]   build/refresh code graphs: every service in
+                 [--directory <p>]  a workspace, or just the current repo.
+                                    --directory/<path> targets one exactly,
+                                    --check reports staleness only,
+                                    --all includes non-git directories
 
 Env overrides: AMALGAM_HOME, AMALGAM_DB, AMALGAM_LLAMA_PORT`);
 }
