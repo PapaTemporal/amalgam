@@ -57,29 +57,32 @@ the model (if installed) starts itself the first time a tool needs it.
 
 ### Typing `amalgam` instead of `node bin/amalgam.mjs`
 
-Every example below writes `amalgam` for brevity. To make that a real command,
-pick whichever suits you:
+Every example below writes `amalgam` for brevity. To make that a real command:
 
-- **A shell alias** — nothing installed, works immediately.
-  PowerShell (add to `$PROFILE`) — **the `@args` is required**:
-  ```powershell
-  function amalgam { node C:\path\to\amalgam\bin\amalgam.mjs @args }
-  ```
-  Without `@args` the function silently drops everything you type, so
-  `amalgam wire --user` reaches the tool as no arguments at all and you get
-  the usage screen instead. `Set-Alias` cannot forward arguments either — it
-  has to be a function.
-  bash/zsh (add to your rc file):
-  ```bash
-  alias amalgam='node /path/to/amalgam/bin/amalgam.mjs'
-  ```
-- **An npm shim** — run `npm link` inside the clone. It writes `amalgam` /
-  `amalgam.cmd` into your **user** npm directory (`%APPDATA%\npm` on Windows),
-  so it needs no admin rights.
+```bash
+node bin/amalgam.mjs shim
+```
 
-Adding `bin/` to your PATH does *not* work: the file is `amalgam.mjs`, and
-Windows will not execute a `.mjs` directly. Otherwise just keep typing
-`node bin/amalgam.mjs …` — every example works that way too.
+That writes `amalgam.cmd` and `amalgam` into a directory already on your PATH
+(no admin), so the command works from cmd, PowerShell, and Git Bash alike and
+survives new shells. Pass a directory to choose one: `amalgam shim <dir>`.
+
+**Why not an alias?** Aliases are the usual advice and the usual bug: both of
+these silently drop your arguments, so `amalgam wire --user` arrives as no
+arguments at all and you get the usage screen.
+
+| | Drops arguments | Works |
+|---|---|---|
+| PowerShell | `function amalgam { node ...malgam.mjs }` | `function amalgam { node ...malgam.mjs @args }` |
+| cmd `doskey` | `doskey amalgam=node ...malgam.mjs` | `doskey amalgam=node ...malgam.mjs $*` |
+
+`Set-Alias` cannot forward arguments at all, and a `doskey` macro lasts only
+for the session that defined it and never applies to PowerShell. Adding `bin/`
+to PATH does not work either: the file is `amalgam.mjs`, which Windows will not
+execute directly.
+
+Or skip all of it and keep typing `node bin/amalgam.mjs ...`; every example
+works that way too.
 
 ### Behind a proxy?
 
