@@ -601,6 +601,20 @@ function cmdGraph(args) {
     else console.log(`graph built ${s.builtAt.toISOString().slice(0, 10)}, ${s.commits} commit(s) since${s.commits > 0 ? " — consider refreshing" : ""}`);
     return;
   }
+  // A graph belongs to one service. Run from a workspace root it would index
+  // every service plus whatever tooling sits beside them, which is slow and
+  // produces a graph too mixed to answer anything well.
+  const services = findServices(target);
+  const isRepo = git(target, ["rev-parse", "--git-dir"]).ok;
+  if (!isRepo && services.length >= 2 && !args.includes("--force")) {
+    console.error(`${target} looks like a workspace, not a service.`);
+    console.error("Graphs are per service. Build them one at a time:\n");
+    for (const s of services) console.error(`  amalgam graph ${s.path}`);
+    console.error("\nOr cd into a service and run `amalgam graph`.");
+    console.error("Pass --force to graph this directory anyway.");
+    process.exit(1);
+  }
+
   console.log(`Building code graph for ${target} (tree-sitter, local, no LLM) ...`);
   const r = spawnSync("uv", ["tool", "run", "--from", "graphifyy", "graphify", ".", "--code-only"], {
     cwd: target, stdio: ["ignore", "inherit", "inherit"],

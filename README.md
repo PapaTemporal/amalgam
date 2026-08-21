@@ -199,8 +199,22 @@ Both merge — existing config in those files is preserved.
 ```bash
 node bin/amalgam.mjs status   # what is present and running
 node bin/amalgam.mjs stats    # measured tool usage — is this earning its keep?
-node bin/amalgam.mjs graph    # build/refresh this repo's code graph
+node bin/amalgam.mjs graph    # build/refresh the code graph (see below)
 ```
+
+`graph` acts on the **current directory** unless you pass a path, and a graph
+belongs to **one service**, not a whole workspace:
+
+```bash
+cd MuseScore && amalgam graph        # from inside the service
+amalgam graph /path/to/MuseScore    # or name it from anywhere
+amalgam graph --check                # is this one stale?
+```
+
+Run from a workspace root it refuses and lists the services, since indexing
+every service plus whatever tooling sits beside them produces a graph too
+mixed to answer anything well.
+
 
 `amalgam graph` wraps graphify with `--code-only`, which keeps it on its local
 tree-sitter path — the docs/media pass would call a cloud LLM, which this
