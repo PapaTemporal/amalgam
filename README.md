@@ -118,6 +118,38 @@ uv tool run --from graphifyy graphify . --code-only
 `--code-only` matters: it keeps graphify on its local tree-sitter path — the
 docs/media pass would call a cloud LLM, which this stack forbids.
 
+## Starting a session: `/start`
+
+BMAD is a set of workflows, not a front door — it never asks what you want to
+do, so every session begins with a blank prompt. The `start` skill is that
+front door. It loads state first (`amalgam brief`: git, work streams, BMAD
+artifacts and their statuses, whether a code graph exists) plus memory of past
+sessions, then offers concrete choices:
+
+> **Build** · **Plan** · **Investigate** · **Housekeeping**
+
+It drills down with real names — "continue story 2.3 (in review)" rather than
+"work on a story" — then routes into the matching BMAD workflow with context
+already loaded, opening a work stream first when the task is build-heavy.
+Invoke it as `/start`, or just say "what should I work on".
+
+`amalgam brief` is useful on its own:
+
+```bash
+amalgam brief                     # current directory
+amalgam brief C:\path\to\repo     # a specific project
+```
+
+```text
+PROJECT  MuseScore  (C:\Users\kinth\code\MuseScore)
+GIT      branch main | 3 uncommitted change(s)
+         open branches: fix/20260820-paste-midmeasure-barline
+STREAMS  none
+BMAD     installed | 49 bmad skills | output _bmad-output
+GRAPH    built (C:\Users\kinth\code\MuseScore\graphify-out\graph.json)
+SERVICES postgres up
+```
+
 ## Work streams (parallel work, and cleaning up after it)
 
 With AI you often have several things in flight. Each one can get its own

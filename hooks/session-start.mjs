@@ -44,6 +44,7 @@ try {
     "- Task end: `memory_save_fact` for each durable fact/decision (dense wording; keep names, paths, commands exact) and `memory_context_write` for project state.",
     "- Independent build-heavy work: isolate it with `amalgam stream new <name> --repo <repo>`; when the result has been judged, `amalgam stream done <name>` so its disk can be reclaimed.",
     "- This applies to all workflows in this session, BMAD skills included.",
+    "- If the user opens without a specific task (\"what should I work on\", \"where did we leave off\"), run the `start` skill: it loads state and offers concrete choices instead of a blank prompt.",
   ];
   if (!pgUp) {
     lines.push("- NOTE: PostgreSQL is not running and could not be auto-started; memory tools will fail until `amalgam start` succeeds.");

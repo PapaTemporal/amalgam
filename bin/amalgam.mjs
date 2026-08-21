@@ -428,7 +428,7 @@ function cmdWire(args) {
       o.mcpServers ??= {};
       o.mcpServers.amalgam = { command: "node", args: [serverPath] };
     });
-    for (const s of ["offload", "caveman"]) {
+    for (const s of ["offload", "caveman", "start"]) {
       copyDir(path.join(HOME, "skills", s), path.join(proj, ".claude", "skills", s));
     }
     // SessionStart hook: starts PostgreSQL if needed and injects the offload
@@ -446,9 +446,9 @@ function cmdWire(args) {
         );
         if (!already) o.hooks.SessionStart.push({ hooks: [{ type: "command", command: cmd }] });
       });
-      console.log("Claude Code wired: .mcp.json + .claude/skills/{offload,caveman} + SessionStart hook");
+      console.log("Claude Code wired: .mcp.json + .claude/skills/{offload,caveman,start} + SessionStart hook");
     } else {
-      console.log("Claude Code wired: .mcp.json + .claude/skills/{offload,caveman}");
+      console.log("Claude Code wired: .mcp.json + .claude/skills/{offload,caveman,start}");
       console.log("  (no hook installed — run 'amalgam install' to refresh the code payload)");
     }
   }
@@ -469,6 +469,113 @@ function cmdWire(args) {
     fs.writeFileSync(ciPath, body);
     console.log("Copilot wired: .vscode/mcp.json + .github/copilot-instructions.md");
   }
+}
+
+// ================================================================ brief
+// One fast, dependency-free scan of "where things stand" in a project, so a
+// guided menu can offer concrete choices ("continue story 2.3") instead of
+// abstract ones ("work on a story"). Filesystem + git only: no database, so
+// it still answers when services are down.
+
+function tomlValue(text, key) {
+  const m = text.match(new RegExp(`^\\s*${key}\\s*=\\s*"([^"]*)"`, "m"));
+  return m ? m[1] : null;
+}
+
+function scanDocs(dir, limit = 12) {
+  const out = [];
+  if (!fs.existsSync(dir)) return out;
+  const walk = (d, depth = 0) => {
+    if (depth > 2 || out.length >= limit) return;
+    let entries = [];
+    try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (out.length >= limit) return;
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) { walk(p, depth + 1); continue; }
+      if (!/\.(md|markdown)$/i.test(e.name)) continue;
+      let status = null;
+      try {
+        const head = fs.readFileSync(p, "utf8").slice(0, 1500);
+        const m = head.match(/^\s*(?:status|Status)\s*[:=]\s*["']?([A-Za-z][\w \-]{0,24})/m)
+          || head.match(/\*\*Status:?\*\*\s*:?\s*([A-Za-z][\w \-]{0,24})/);
+        if (m) status = m[1].trim();
+      } catch {}
+      out.push({ file: path.relative(dir, p).replace(/\\/g, "/"), status });
+    }
+  };
+  walk(dir);
+  return out;
+}
+
+function cmdBrief(args) {
+  const repo = path.resolve(args.find((a) => !a.startsWith("--")) ?? process.cwd());
+  const L = [];
+  L.push(`PROJECT  ${path.basename(repo)}  (${repo})`);
+
+  // --- git ---
+  if (git(repo, ["rev-parse", "--git-dir"]).ok) {
+    const branch = git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]).out;
+    const dirty = git(repo, ["status", "--porcelain"]).out.split("\n").filter(Boolean).length;
+    const inWorktree = git(repo, ["rev-parse", "--is-inside-work-tree"]).ok;
+    L.push(`GIT      branch ${branch}${dirty ? ` | ${dirty} uncommitted change(s)` : " | clean"}${inWorktree ? "" : ""}`);
+    const fixBranches = git(repo, ["branch", "--list", "fix/*", "stream/*", "--format=%(refname:short)"]).out
+      .split("\n").filter(Boolean);
+    if (fixBranches.length) L.push(`         open branches: ${fixBranches.slice(0, 8).join(", ")}${fixBranches.length > 8 ? " ..." : ""}`);
+  } else {
+    L.push("GIT      not a git repository");
+  }
+
+  // --- amalgam streams for this repo ---
+  const db = readStreams();
+  const mine = Object.values(db.streams ?? {}).filter((s) => path.resolve(s.repo) === repo);
+  if (mine.length === 0) L.push("STREAMS  none");
+  else {
+    L.push(`STREAMS  ${mine.length}`);
+    for (const s of mine) {
+      const st = inspectStream(s, { sizes: false });
+      const flags = [st.pinned ? "pinned" : null, st.evaluated ? "done" : null, st.dirty ? "dirty" : null,
+        st.merged ? "merged" : `${st.unmergedCommits} unmerged`].filter(Boolean).join(", ");
+      L.push(`         ${s.name} -> ${s.path}  [${flags}]${s.purpose ? `  ${s.purpose}` : ""}`);
+    }
+  }
+
+  // --- BMAD ---
+  const bmadDir = path.join(repo, "_bmad");
+  if (fs.existsSync(bmadDir)) {
+    let outFolder = "_bmad-output", planning = null, impl = null;
+    try {
+      const cfg = fs.readFileSync(path.join(bmadDir, "config.toml"), "utf8");
+      outFolder = tomlValue(cfg, "output_folder") ?? outFolder;
+      planning = tomlValue(cfg, "planning_artifacts");
+      impl = tomlValue(cfg, "implementation_artifacts");
+    } catch {}
+    const resolve = (v, fallback) => (v ? v.replace("{project-root}", repo) : path.join(repo, outFolder, fallback));
+    const planDir = resolve(planning, "planning-artifacts");
+    const implDir = resolve(impl, "implementation-artifacts");
+    const skills = (() => {
+      try { return fs.readdirSync(path.join(repo, ".claude", "skills")).filter((n) => n.startsWith("bmad-")).length; }
+      catch { return 0; }
+    })();
+    L.push(`BMAD     installed | ${skills} bmad skills | output ${outFolder}`);
+    const plans = scanDocs(planDir);
+    const stories = scanDocs(implDir);
+    L.push(`         planning artifacts (${planDir}): ${plans.length === 0 ? "none yet" : ""}`);
+    for (const p of plans) L.push(`           ${p.file}${p.status ? `  [${p.status}]` : ""}`);
+    L.push(`         implementation artifacts (${implDir}): ${stories.length === 0 ? "none yet" : ""}`);
+    for (const s of stories) L.push(`           ${s.file}${s.status ? `  [${s.status}]` : ""}`);
+  } else {
+    L.push("BMAD     not installed in this project");
+  }
+
+  // --- graphify ---
+  const graph = path.join(repo, "graphify-out", "graph.json");
+  L.push(`GRAPH    ${fs.existsSync(graph) ? `built (${graph})` : "not built — `uv tool run --from graphifyy graphify . --code-only`"}`);
+
+  // --- services ---
+  L.push(`SERVICES postgres ${pgRunning() ? "up" : "down (auto-starts on first memory call)"}`);
+
+  console.log(L.join("\n"));
 }
 
 // ================================================================ streams
@@ -756,6 +863,7 @@ switch (cmd) {
   case "status": await cmdStatus(); break;
   case "wire": cmdWire(rest); break;
   case "stream": cmdStream(rest); break;
+  case "brief": cmdBrief(rest); break;
   default:
     console.log(`amalgam — local offload stack (memory + caveman compression + code graphs)
 
@@ -766,7 +874,9 @@ Usage:
   amalgam status                    health check
   amalgam wire [--claude|--copilot] wire the current project (default: both)
   amalgam stream <sub>              parallel work streams as git worktrees
-                                    (new | list | done | gc | drop)
+                                    (new | list | done | gc | drop | pin)
+  amalgam brief [repo]              where things stand: git, streams, BMAD
+                                    artifacts, graph, services
 
 Env overrides: AMALGAM_HOME, AMALGAM_PG_PORT, AMALGAM_LLAMA_PORT`);
 }
