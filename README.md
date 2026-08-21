@@ -61,10 +61,14 @@ Every example below writes `amalgam` for brevity. To make that a real command,
 pick whichever suits you:
 
 - **A shell alias** — nothing installed, works immediately.
-  PowerShell (add to `$PROFILE`):
+  PowerShell (add to `$PROFILE`) — **the `@args` is required**:
   ```powershell
   function amalgam { node C:\path\to\amalgam\bin\amalgam.mjs @args }
   ```
+  Without `@args` the function silently drops everything you type, so
+  `amalgam wire --user` reaches the tool as no arguments at all and you get
+  the usage screen instead. `Set-Alias` cannot forward arguments either — it
+  has to be a function.
   bash/zsh (add to your rc file):
   ```bash
   alias amalgam='node /path/to/amalgam/bin/amalgam.mjs'

@@ -1055,6 +1055,19 @@ switch (cmd) {
   case "globalize": cmdGlobalize(rest); break;
   case "graph": cmdGraph(rest); break;
   default:
+    // Distinguish "you typed a command I don't know" from "I received nothing
+    // at all". The second usually means a shell wrapper ate the arguments,
+    // which otherwise looks like the tool ignoring a perfectly good command.
+    if (cmd === undefined) {
+      console.log("No command given — the arguments never reached amalgam.\n");
+      console.log("If you ran this through a shell alias or function, that is the usual cause:");
+      console.log("  PowerShell: a function must forward arguments with @args");
+      console.log("     function amalgam { node C:\\path\\to\\amalgam\\bin\\amalgam.mjs @args }");
+      console.log("     (Set-Alias cannot pass arguments at all — use a function.)");
+      console.log("  bash/zsh:   alias amalgam='node /path/to/amalgam/bin/amalgam.mjs'\n");
+    } else {
+      console.log(`Unknown command: ${cmd}\n`);
+    }
     console.log(`amalgam — local offload stack (memory + caveman compression + code graphs)
 
 Usage:

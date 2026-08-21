@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "amalgam": {
+      "command": "node",
+      "args": [
+        "C:\\Users\\kinth\\.amalgam\\mcp\\server.mjs"
+      ]
+    }
+  }
+}
