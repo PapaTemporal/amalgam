@@ -603,13 +603,54 @@ function scanDocs(dir, limit = 12) {
   return out;
 }
 
+/**
+ * Directories sitting inside a workspace — the "services" BMAD documents.
+ * Non-git directories count too: a service is a body of code, not a checkout.
+ */
+function findServices(root) {
+  const out = [];
+  let entries = [];
+  try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch { return out; }
+  for (const e of entries) {
+    if (!e.isDirectory() || e.name.startsWith(".") || e.name.startsWith("_") || e.name === "node_modules") continue;
+    const p = path.join(root, e.name);
+    const isGit = fs.existsSync(path.join(p, ".git"));
+    out.push({
+      name: e.name,
+      path: p,
+      isGit,
+      branch: isGit ? git(p, ["rev-parse", "--abbrev-ref", "HEAD"]).out : null,
+      dirty: isGit ? git(p, ["status", "--porcelain"]).out.split("\n").filter(Boolean).length : 0,
+      graph: fs.existsSync(path.join(p, "graphify-out", "graph.json")),
+    });
+  }
+  return out;
+}
+
 function cmdBrief(args) {
   const repo = path.resolve(args.find((a) => !a.startsWith("--")) ?? process.cwd());
   const L = [];
-  L.push(`PROJECT  ${path.basename(repo)}  (${repo})`);
+  const isRepo = git(repo, ["rev-parse", "--git-dir"]).ok;
+  const services = findServices(repo);
+  // A workspace is a directory that holds service repos rather than being one
+  // itself. BMAD is installed at this level: it documents the whole system,
+  // with each cloned repo as a service under it.
+  const isWorkspace = !isRepo && services.length > 0;
+  L.push(`${isWorkspace ? "WORKSPACE" : "PROJECT  "} ${path.basename(repo)}  (${repo})`);
+
+  if (isWorkspace) {
+    L.push(`SERVICES ${services.length} under this workspace`);
+    for (const s of services) {
+      const bits = s.isGit
+        ? [s.branch, s.dirty ? `${s.dirty} uncommitted` : "clean"]
+        : ["not a git repo"];
+      if (s.graph) bits.push("graph built");
+      L.push(`         ${s.name}  [${bits.join(", ")}]`);
+    }
+  }
 
   // --- git ---
-  if (git(repo, ["rev-parse", "--git-dir"]).ok) {
+  if (isRepo) {
     const branch = git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]).out;
     const dirty = git(repo, ["status", "--porcelain"]).out.split("\n").filter(Boolean).length;
     const inWorktree = git(repo, ["rev-parse", "--is-inside-work-tree"]).ok;
@@ -617,7 +658,7 @@ function cmdBrief(args) {
     const fixBranches = git(repo, ["branch", "--list", "fix/*", "stream/*", "--format=%(refname:short)"]).out
       .split("\n").filter(Boolean);
     if (fixBranches.length) L.push(`         open branches: ${fixBranches.slice(0, 8).join(", ")}${fixBranches.length > 8 ? " ..." : ""}`);
-  } else {
+  } else if (!isWorkspace) {
     L.push("GIT      not a git repository");
   }
 
@@ -668,7 +709,7 @@ function cmdBrief(args) {
   L.push(`GRAPH    ${fs.existsSync(graph) ? `built (${graph})` : "not built — `uv tool run --from graphifyy graphify . --code-only`"}`);
 
   // --- services ---
-  L.push(`SERVICES postgres ${pgRunning() ? "up" : "down (auto-starts on first memory call)"}`);
+  L.push(`RUNTIME  postgres ${pgRunning() ? "up" : "down (auto-starts on first memory call)"}`);
 
   console.log(L.join("\n"));
 }

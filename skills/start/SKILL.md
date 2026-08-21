@@ -73,25 +73,28 @@ rather than the abstract category.
 Keep it to two questions. A third is only for a genuine fork the answer
 depends on; more than that is an interrogation, not a flow.
 
-## Step 3b — check the route exists before offering it
+## Step 3b — workspace vs. service, and checking the route exists
 
-Skill availability and project config are two different things, and they fail
-differently:
+`amalgam brief` reports either a WORKSPACE (a directory holding several
+services) or a PROJECT (a single repo).
 
-- **Skills** (`bmad-*`) should live at user scope (`~/.claude/skills/`), where
-  they load in every session regardless of which repo is open. Their bodies
-  use `{project-root}` placeholders and resolve the project at runtime, so one
-  copy serves every repo. If they are missing from your available-skills list
-  (check with `ListSkills`), they were installed into a single project instead;
-  the fix is `amalgam globalize <that-project>`.
-- **Project config** (`_bmad/` with `config.toml` and scripts) is per-repo and
-  genuinely required — BMAD workflows read it. `amalgam brief` reports whether
-  it exists. If it does not, the fix is
-  `npx bmad-method install --directory <project>` in that repo.
+**BMAD lives at the workspace level.** Its `_bmad/` config, its
+`_bmad-output/` documents, and its skills belong to the workspace, and its
+workflows reason across every service under it — planning, documentation, and
+architecture describe the whole system, not one checkout. Do not install BMAD
+inside an individual service repo.
 
-Never invent a skill name or pretend a handoff happened. When a route is
-unavailable, say which of the two is missing and name the one command that
-fixes it.
+So in a workspace, when a chosen workflow concerns code rather than the system
+as a whole, the useful extra question is **which service** it targets — offer
+the service list from the brief. Implementation work then happens in that
+service's repo (in a stream when it is build-heavy), while the planning
+artifacts it came from stay at the workspace level.
+
+Before routing, confirm the target skill is in your available-skills list
+(`ListSkills` if unsure). If `bmad-*` skills are missing, the session is
+probably rooted inside a service instead of at the workspace — say so and name
+the workspace directory. Never invent a skill name or pretend a handoff
+happened.
 
 ## Step 4 — set up, then hand off
 

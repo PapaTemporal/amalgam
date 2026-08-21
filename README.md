@@ -98,29 +98,40 @@ node /path/to/amalgam/bin/amalgam.mjs wire --claude   # Claude Code only
 node /path/to/amalgam/bin/amalgam.mjs wire --copilot  # VS Code Copilot only
 ```
 
-### Using BMAD across repositories
+### Workspace layout (where BMAD goes)
 
-BMAD's installer writes its skills into `<project>/.claude/skills`, which makes
-them invocable only from sessions rooted in that project — even though the
-skill bodies are fully portable (they use `{project-root}` placeholders and
-resolve the project at runtime). Promote them once:
+BMAD is a **workspace-level** tool, not a per-repo one. Install it once at the
+directory that holds your repos; clone services into that directory; its
+workflows then reason across the whole system and write their documents at the
+workspace level.
 
-```bash
-node bin/amalgam.mjs globalize C:\path\to\project   # bmad-* -> ~/.claude/skills
+```text
+code/                        <- workspace: BMAD installed HERE
+├── _bmad/                   BMAD config, scripts, modules
+├── _bmad-output/            PRDs, epics, stories, project docs for ALL services
+├── .claude/skills/          bmad-* workflows + amalgam skills
+├── MuseScore/               service (cloned repo) — no BMAD inside it
+├── pedalboard/              service
+└── amalgam-pkg/             service
 ```
 
-The split that results is the one you want:
+```bash
+cd C:\path\to\workspace
+npx bmad-method install --yes --tools claude-code --directory .
+node /path/to/amalgam/bin/amalgam.mjs wire        # amalgam for the same workspace
+```
 
-| Piece | Scope | Why |
-|---|---|---|
-| `bmad-*` skills (workflow logic) | user — `~/.claude/skills/` | identical for every repo |
-| `_bmad/` (config, scripts, modules) | per project | names the project, its output paths, its customizations |
-| `_bmad-output/` (artifacts) | per project | PRDs, epics, stories belong to their repo |
+Run your agent sessions from the workspace directory. `amalgam brief` detects
+this shape and lists the services under it with their branch and state, so
+`/start` can ask which service a piece of work targets while keeping planning
+artifacts where they belong — above the services, describing the system.
 
-For each additional repo, run `npx bmad-method install --directory <repo>` to
-create its `_bmad/`, then `amalgam globalize <repo>` to keep exactly one copy
-of the skills. Use `--keep` if you deliberately want a project-pinned version
-that shadows the global one, and `--prefix` for tools other than BMAD.
+Nothing is installed into a service repo. A service keeps only its own code
+(plus, optionally, a `graphify-out/` code graph, which is per-repo by nature).
+
+> `amalgam globalize <dir>` exists for the unrelated case of a tool that
+> insists on installing its skills per-repo: it promotes them to
+> `~/.claude/skills/` so they load everywhere. BMAD does not need it.
 
 - **Claude Code**: writes `.mcp.json` (server `amalgam`) and copies the
   `offload` + `caveman` skills into `.claude/skills/`.
