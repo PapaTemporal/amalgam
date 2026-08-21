@@ -73,6 +73,23 @@ rather than the abstract category.
 Keep it to two questions. A third is only for a genuine fork the answer
 depends on; more than that is an interrogation, not a flow.
 
+## Step 3b — check the route exists before offering it
+
+BMAD skills are **project-scoped**: they live in `<project>/.claude/skills/`
+and are only invocable when the session's working directory is that project.
+A session rooted in a parent folder sees `amalgam brief` report "BMAD
+installed" while none of the `bmad-*` skills are actually callable.
+
+So before routing, confirm the target skill is in your available-skills list
+(`ListSkills` with a keyword if unsure). If it is missing:
+
+- Say plainly that BMAD's workflows need a session whose working directory is
+  the project itself, and name the directory.
+- Offer the two real choices: reopen/switch the session in that directory, or
+  proceed here without BMAD's workflow (you do the work directly, and still
+  save results to memory).
+- Do not invent a skill name or pretend the handoff happened.
+
 ## Step 4 — set up, then hand off
 
 Before invoking the chosen workflow:
