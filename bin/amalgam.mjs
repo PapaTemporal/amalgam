@@ -321,6 +321,17 @@ async function cmdInstall(args) {
   writeStamp();
   console.log("\nInstall complete. Next, in each project:  amalgam wire");
   console.log("(or once for all of them:  amalgam wire --user)");
+
+  // Installs predating the SQLite migration left a PostgreSQL runtime behind.
+  // Nothing reads it any more, and memories in it are not migrated
+  // automatically, so say both rather than leaving ~350 MB of confusion.
+  const oldPg = path.join(HOME, "runtime", "pgsql");
+  if (fs.existsSync(oldPg)) {
+    console.log("\nNote: a PostgreSQL runtime from an older amalgam is still present:");
+    console.log(`  ${oldPg}`);
+    console.log("Memory now uses SQLite and nothing reads it. It is safe to delete.");
+    console.log("Memories stored in it are NOT migrated automatically — say so if you need them.");
+  }
   if (spawnSync("uv", ["--version"], { stdio: "ignore" }).status !== 0) {
     console.log("\nNote: `uv` was not found, so code-graph commands are unavailable.");
     console.log("Memory works without it. Install from https://docs.astral.sh/uv/ to enable");
