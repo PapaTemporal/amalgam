@@ -413,7 +413,102 @@ All services are on 127.0.0.1 — never substitute cloud services.
 - If tools error "unreachable", ask the user to run: \`amalgam start\`.
 ${COPILOT_MARK_END}`;
 
+// User-scope Claude Code locations. Skills and hooks placed here apply to
+// every session on the machine, regardless of which repo it opens — which is
+// what agent skills (amalgam's and BMAD's alike) generally want, since their
+// workflows resolve the project at runtime rather than at install time.
+const USER_CLAUDE_DIR = path.join(os.homedir(), ".claude");
+const USER_SKILLS_DIR = path.join(USER_CLAUDE_DIR, "skills");
+const USER_SETTINGS = path.join(USER_CLAUDE_DIR, "settings.json");
+const USER_MCP_CONFIG = path.join(os.homedir(), ".claude.json");
+
+function backupOnce(file) {
+  try {
+    if (fs.existsSync(file) && !fs.existsSync(file + ".amalgam-bak")) {
+      fs.copyFileSync(file, file + ".amalgam-bak");
+    }
+  } catch {}
+}
+
+/** Install amalgam's skills, hook, and MCP server for every project at once. */
+function wireUser() {
+  const serverPath = path.join(HOME, "mcp", "server.mjs");
+  if (!fs.existsSync(serverPath)) {
+    console.error(`Server not found at ${serverPath} — run 'amalgam install' first.`);
+    process.exit(1);
+  }
+
+  for (const s of ["offload", "caveman", "start"]) {
+    copyDir(path.join(HOME, "skills", s), path.join(USER_SKILLS_DIR, s));
+  }
+  console.log(`Skills -> ${USER_SKILLS_DIR} (offload, caveman, start)`);
+
+  const hookPath = path.join(HOME, "hooks", "session-start.mjs");
+  if (fs.existsSync(hookPath)) {
+    backupOnce(USER_SETTINGS);
+    mergeJsonFile(USER_SETTINGS, (o) => {
+      o.hooks ??= {};
+      o.hooks.SessionStart ??= [];
+      const already = o.hooks.SessionStart.some((entry) =>
+        (entry.hooks ?? []).some((h) => typeof h.command === "string" && h.command.includes("session-start.mjs"))
+      );
+      if (!already) o.hooks.SessionStart.push({ hooks: [{ type: "command", command: `node "${hookPath}"` }] });
+    });
+    console.log(`SessionStart hook -> ${USER_SETTINGS}`);
+  }
+
+  // MCP at user scope lives in ~/.claude.json. That file holds unrelated user
+  // state, so back it up before merging into it.
+  backupOnce(USER_MCP_CONFIG);
+  mergeJsonFile(USER_MCP_CONFIG, (o) => {
+    o.mcpServers ??= {};
+    o.mcpServers.amalgam = { command: "node", args: [serverPath] };
+  });
+  console.log(`MCP server -> ${USER_MCP_CONFIG} (mcpServers.amalgam)`);
+  console.log("\nUser-scope wiring done — applies to every project on this machine.");
+  console.log("Takes effect in new sessions.");
+}
+
+/**
+ * Promote a project's agent skills to user scope.
+ *
+ * BMAD installs its skills into <project>/.claude/skills, which makes them
+ * invocable only from sessions rooted in that project — even though the skill
+ * bodies use {project-root} placeholders and are perfectly portable. Moving
+ * them up makes BMAD usable across every repo, while each project keeps its
+ * own _bmad/ config and artifacts.
+ */
+function cmdGlobalize(args) {
+  const proj = path.resolve(args.find((a) => !a.startsWith("--")) ?? process.cwd());
+  const prefix = (() => { const i = args.indexOf("--prefix"); return i >= 0 ? args[i + 1] : "bmad-"; })();
+  const keep = args.includes("--keep");
+  const src = path.join(proj, ".claude", "skills");
+  if (!fs.existsSync(src)) {
+    console.error(`No skills directory at ${src}`);
+    process.exit(1);
+  }
+  const names = fs.readdirSync(src, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && e.name.startsWith(prefix))
+    .map((e) => e.name);
+  if (names.length === 0) {
+    console.log(`No skills starting with "${prefix}" in ${src}`);
+    return;
+  }
+  for (const n of names) {
+    copyDir(path.join(src, n), path.join(USER_SKILLS_DIR, n));
+    if (!keep) fs.rmSync(path.join(src, n), { recursive: true, force: true });
+  }
+  console.log(`${names.length} skill(s) matching "${prefix}" -> ${USER_SKILLS_DIR}`);
+  console.log(keep
+    ? "Project copies kept — note they shadow the user-scope ones in that project."
+    : "Project copies removed, so there is exactly one definition of each.");
+  console.log(`\nEach project still needs its own config: run the tool's own installer there`);
+  console.log(`(for BMAD: npx bmad-method install --directory <project>) to create _bmad/.`);
+  console.log("Takes effect in new sessions.");
+}
+
 function cmdWire(args) {
+  if (args.includes("--user") || args.includes("--global")) return wireUser();
   const doClaude = args.includes("--claude") || (!args.includes("--copilot"));
   const doCopilot = args.includes("--copilot") || (!args.includes("--claude"));
   const proj = process.cwd();
@@ -864,6 +959,7 @@ switch (cmd) {
   case "wire": cmdWire(rest); break;
   case "stream": cmdStream(rest); break;
   case "brief": cmdBrief(rest); break;
+  case "globalize": cmdGlobalize(rest); break;
   default:
     console.log(`amalgam — local offload stack (memory + caveman compression + code graphs)
 
@@ -873,6 +969,11 @@ Usage:
   amalgam stop                      stop both services
   amalgam status                    health check
   amalgam wire [--claude|--copilot] wire the current project (default: both)
+  amalgam wire --user               wire once for EVERY project on this machine
+                                    (skills + hook + MCP at user scope)
+  amalgam globalize [project]       promote a project's bmad-* skills to user
+                                    scope so they work in every repo
+                                    (--prefix <p>, --keep)
   amalgam stream <sub>              parallel work streams as git worktrees
                                     (new | list | done | gc | drop | pin)
   amalgam brief [repo]              where things stand: git, streams, BMAD

@@ -75,20 +75,23 @@ depends on; more than that is an interrogation, not a flow.
 
 ## Step 3b — check the route exists before offering it
 
-BMAD skills are **project-scoped**: they live in `<project>/.claude/skills/`
-and are only invocable when the session's working directory is that project.
-A session rooted in a parent folder sees `amalgam brief` report "BMAD
-installed" while none of the `bmad-*` skills are actually callable.
+Skill availability and project config are two different things, and they fail
+differently:
 
-So before routing, confirm the target skill is in your available-skills list
-(`ListSkills` with a keyword if unsure). If it is missing:
+- **Skills** (`bmad-*`) should live at user scope (`~/.claude/skills/`), where
+  they load in every session regardless of which repo is open. Their bodies
+  use `{project-root}` placeholders and resolve the project at runtime, so one
+  copy serves every repo. If they are missing from your available-skills list
+  (check with `ListSkills`), they were installed into a single project instead;
+  the fix is `amalgam globalize <that-project>`.
+- **Project config** (`_bmad/` with `config.toml` and scripts) is per-repo and
+  genuinely required — BMAD workflows read it. `amalgam brief` reports whether
+  it exists. If it does not, the fix is
+  `npx bmad-method install --directory <project>` in that repo.
 
-- Say plainly that BMAD's workflows need a session whose working directory is
-  the project itself, and name the directory.
-- Offer the two real choices: reopen/switch the session in that directory, or
-  proceed here without BMAD's workflow (you do the work directly, and still
-  save results to memory).
-- Do not invent a skill name or pretend the handoff happened.
+Never invent a skill name or pretend a handoff happened. When a route is
+unavailable, say which of the two is missing and name the one command that
+fixes it.
 
 ## Step 4 — set up, then hand off
 

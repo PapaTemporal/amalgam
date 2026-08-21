@@ -75,7 +75,21 @@ Already have the files on another machine? Copy them over and pass
 `--cache <dir>`, or drop them straight into the destinations above — the
 most proxy-proof option of all.
 
-## Wire a project (per project)
+## Wire it up
+
+**Recommended — once per machine, works in every repo:**
+
+```bash
+node bin/amalgam.mjs wire --user
+```
+
+This installs the skills into `~/.claude/skills/`, the SessionStart hook into
+`~/.claude/settings.json`, and the MCP server into `~/.claude.json` — so every
+session on the machine has them, whichever repo it opens. (Both config files
+are backed up as `*.amalgam-bak` before the first merge.)
+
+**Per project** (adds a project-local `.mcp.json` / `.vscode/mcp.json`, useful
+when a repo should carry its own wiring):
 
 ```bash
 cd your-project
@@ -83,6 +97,30 @@ node /path/to/amalgam/bin/amalgam.mjs wire            # both agents
 node /path/to/amalgam/bin/amalgam.mjs wire --claude   # Claude Code only
 node /path/to/amalgam/bin/amalgam.mjs wire --copilot  # VS Code Copilot only
 ```
+
+### Using BMAD across repositories
+
+BMAD's installer writes its skills into `<project>/.claude/skills`, which makes
+them invocable only from sessions rooted in that project — even though the
+skill bodies are fully portable (they use `{project-root}` placeholders and
+resolve the project at runtime). Promote them once:
+
+```bash
+node bin/amalgam.mjs globalize C:\path\to\project   # bmad-* -> ~/.claude/skills
+```
+
+The split that results is the one you want:
+
+| Piece | Scope | Why |
+|---|---|---|
+| `bmad-*` skills (workflow logic) | user — `~/.claude/skills/` | identical for every repo |
+| `_bmad/` (config, scripts, modules) | per project | names the project, its output paths, its customizations |
+| `_bmad-output/` (artifacts) | per project | PRDs, epics, stories belong to their repo |
+
+For each additional repo, run `npx bmad-method install --directory <repo>` to
+create its `_bmad/`, then `amalgam globalize <repo>` to keep exactly one copy
+of the skills. Use `--keep` if you deliberately want a project-pinned version
+that shadows the global one, and `--prefix` for tools other than BMAD.
 
 - **Claude Code**: writes `.mcp.json` (server `amalgam`) and copies the
   `offload` + `caveman` skills into `.claude/skills/`.
