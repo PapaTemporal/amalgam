@@ -566,6 +566,49 @@ function cmdWire(args) {
   }
 }
 
+// ================================================================ graph
+// graphify builds a code graph that answers "what calls this / how do these
+// connect" for a fraction of the tokens reading files costs. The graph is a
+// snapshot, so it goes stale as code lands — hence staleness reporting below
+// and a refresh command that always passes --code-only (the docs/media pass
+// would call a cloud backend, which this stack forbids).
+
+const GRAPH_REL = path.join("graphify-out", "graph.json");
+
+/** null = no graph; otherwise commits landed since it was built. */
+function graphStaleness(repo) {
+  const g = path.join(repo, GRAPH_REL);
+  if (!fs.existsSync(g)) return null;
+  let builtAt;
+  try { builtAt = fs.statSync(g).mtime; } catch { return null; }
+  if (!git(repo, ["rev-parse", "--git-dir"]).ok) return { builtAt, commits: 0, unknown: true };
+  const out = git(repo, ["log", "--since", builtAt.toISOString(), "--oneline"]).out;
+  return { builtAt, commits: out ? out.split("\n").filter(Boolean).length : 0 };
+}
+
+function cmdGraph(args) {
+  const target = path.resolve(args.find((a) => !a.startsWith("--")) ?? process.cwd());
+  if (!fs.existsSync(target)) {
+    console.error(`No such directory: ${target}`);
+    process.exit(1);
+  }
+  if (args.includes("--check")) {
+    const s = graphStaleness(target);
+    if (!s) console.log(`no graph in ${target} — build one with: amalgam graph ${target}`);
+    else console.log(`graph built ${s.builtAt.toISOString().slice(0, 10)}, ${s.commits} commit(s) since${s.commits > 0 ? " — consider refreshing" : ""}`);
+    return;
+  }
+  console.log(`Building code graph for ${target} (tree-sitter, local, no LLM) ...`);
+  const r = spawnSync("uv", ["tool", "run", "--from", "graphifyy", "graphify", ".", "--code-only"], {
+    cwd: target, stdio: ["ignore", "inherit", "inherit"],
+  });
+  if (r.status !== 0) {
+    console.error("graphify failed. Is uv installed? (https://docs.astral.sh/uv/)");
+    process.exit(1);
+  }
+  console.log(`\nGraph at ${path.join(target, GRAPH_REL)} — query it with the graph_query MCP tool.`);
+}
+
 // ================================================================ brief
 // One fast, dependency-free scan of "where things stand" in a project, so a
 // guided menu can offer concrete choices ("continue story 2.3") instead of
@@ -644,7 +687,10 @@ function cmdBrief(args) {
       const bits = s.isGit
         ? [s.branch, s.dirty ? `${s.dirty} uncommitted` : "clean"]
         : ["not a git repo"];
-      if (s.graph) bits.push("graph built");
+      const st = graphStaleness(s.path);
+      if (!st) bits.push("no graph");
+      else if (st.commits > 0) bits.push(`graph ${st.commits} commit(s) stale`);
+      else bits.push("graph current");
       L.push(`         ${s.name}  [${bits.join(", ")}]`);
     }
   }
@@ -705,8 +751,10 @@ function cmdBrief(args) {
   }
 
   // --- graphify ---
-  const graph = path.join(repo, "graphify-out", "graph.json");
-  L.push(`GRAPH    ${fs.existsSync(graph) ? `built (${graph})` : "not built — `uv tool run --from graphifyy graphify . --code-only`"}`);
+  const gst = graphStaleness(repo);
+  L.push(`GRAPH    ${!gst ? "not built — run `amalgam graph`"
+    : gst.commits > 0 ? `built ${gst.builtAt.toISOString().slice(0, 10)}, ${gst.commits} commit(s) since — refresh with \`amalgam graph\``
+      : `current (built ${gst.builtAt.toISOString().slice(0, 10)})`}`);
 
   // --- services ---
   L.push(`RUNTIME  postgres ${pgRunning() ? "up" : "down (auto-starts on first memory call)"}`);
@@ -1001,6 +1049,7 @@ switch (cmd) {
   case "stream": cmdStream(rest); break;
   case "brief": cmdBrief(rest); break;
   case "globalize": cmdGlobalize(rest); break;
+  case "graph": cmdGraph(rest); break;
   default:
     console.log(`amalgam — local offload stack (memory + caveman compression + code graphs)
 
@@ -1019,6 +1068,8 @@ Usage:
                                     (new | list | done | gc | drop | pin)
   amalgam brief [repo]              where things stand: git, streams, BMAD
                                     artifacts, graph, services
+  amalgam graph [repo] [--check]    build/refresh a local code graph
+                                    (--check reports staleness only)
 
 Env overrides: AMALGAM_HOME, AMALGAM_PG_PORT, AMALGAM_LLAMA_PORT`);
 }
