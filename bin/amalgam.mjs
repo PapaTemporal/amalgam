@@ -63,6 +63,9 @@ const DOWNLOADS = [
     url: "https://get.enterprisedb.com/postgresql/postgresql-17.5-1-windows-x64-binaries.zip",
     archive: path.join(HOME, "downloads", "postgresql-17.5-1-windows-x64-binaries.zip"),
     extractTo: path.join(HOME, "runtime"), // zip contains pgsql/
+    // Skip pgAdmin/docs/etc: unneeded, huge, and their deep paths can
+    // exceed Windows' 260-char limit. bin+lib+share is a complete server.
+    extractMembers: ["pgsql/bin/*", "pgsql/lib/*", "pgsql/share/*"],
     check: pgBin("psql"),
     winOnly: true,
     approx: "~300 MB",
@@ -200,9 +203,16 @@ function download(d) {
   return false;
 }
 
-function extractZip(zip, dest) {
+function extractZip(zip, dest, members = []) {
   fs.mkdirSync(dest, { recursive: true });
   if (WIN) {
+    // Use Windows' own bsdtar by absolute path: a Git Bash / MSYS "tar" on
+    // PATH is GNU tar, which parses "C:\..." as a remote host. bsdtar also
+    // handles zips, long paths, and selective member extraction.
+    const tarExe = path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe");
+    const args = ["-xf", path.resolve(zip), "-C", path.resolve(dest), ...members];
+    const tar = spawnSync(tarExe, args, { stdio: ["ignore", "ignore", "inherit"] });
+    if (tar.status === 0) return true;
     const r = spawnSync(
       "powershell",
       ["-NoProfile", "-Command", `Expand-Archive -Path '${zip}' -DestinationPath '${dest}' -Force`],
@@ -268,7 +278,7 @@ async function cmdInstall(args) {
     }
     if (d.extractTo) {
       console.log(`  extracting ${d.id} ...`);
-      if (!extractZip(d.archive, d.extractTo)) {
+      if (!extractZip(d.archive, d.extractTo, d.extractMembers ?? [])) {
         console.error(`  extraction failed for ${d.archive}`);
         failed.push(d);
       }
