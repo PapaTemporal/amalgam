@@ -10,6 +10,9 @@
  * MCP stdio transport = newline-delimited JSON-RPC 2.0. Implemented by hand
  * so nothing needs to be installed.
  */
+// Must come first — see lib/preflight.mjs.
+import "../lib/preflight.mjs";
+
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";

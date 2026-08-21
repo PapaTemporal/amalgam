@@ -11,6 +11,10 @@
  * download prints the manual URL + destination so proxied machines can
  * fetch files by hand and re-run.
  */
+// Must come first: it reports an unsupported Node clearly, before the SQLite
+// import that would otherwise fail with an opaque built-in-module error.
+import "../lib/preflight.mjs";
+
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -316,6 +320,12 @@ async function cmdInstall(args) {
   // created on first use by lib/db.mjs.
   writeStamp();
   console.log("\nInstall complete. Next, in each project:  amalgam wire");
+  console.log("(or once for all of them:  amalgam wire --user)");
+  if (spawnSync("uv", ["--version"], { stdio: "ignore" }).status !== 0) {
+    console.log("\nNote: `uv` was not found, so code-graph commands are unavailable.");
+    console.log("Memory works without it. Install from https://docs.astral.sh/uv/ to enable");
+    console.log("`amalgam graph` and the graph_query tool.");
+  }
   if (!modelInstalled()) {
     console.log("(The optional local model was not installed. `digest` and `caveman_*`");
     console.log(" stay unavailable until you run: amalgam install --with-model)");
