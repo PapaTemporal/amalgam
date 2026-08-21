@@ -3,8 +3,8 @@
  * SessionStart hook — makes the offload stack automatic.
  *
  * Two jobs, both silent-failing so a session can never be blocked:
- *   1. Bring PostgreSQL up if the machine rebooted since the last session
- *      (llama-server stays down until a caveman_* tool actually needs it).
+ *   1. Report anything worth reclaiming. Nothing needs starting: memory is a
+ *      SQLite file, and the optional model loads on first use.
  *   2. Emit the offload directives on stdout, which Claude Code injects as
  *      session context. This is deterministic, unlike skill description
  *      matching, and it reaches every workflow — including BMAD's — without

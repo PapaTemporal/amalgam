@@ -250,8 +250,9 @@ function pgRunning() {
 // ---------------------------------------------------------------- commands
 async function cmdInstall(args) {
   if (!WIN) {
-    console.log("Non-Windows install is manual for now: put a llama.cpp build and PostgreSQL");
-    console.log(`binaries under ${HOME}/runtime/{llama,pgsql} and the model under ${HOME}/models/.`);
+    console.log("Non-Windows: memory works as-is (SQLite is built into Node). For the");
+    console.log(`optional model, put a llama.cpp build under ${HOME}/runtime/llama and`);
+    console.log(`the GGUF model(s) under ${HOME}/models/.`);
     console.log(manualHelp(DOWNLOADS.filter((d) => !d.winOnly)));
   }
   const cacheIdx = args.indexOf("--cache");
@@ -522,8 +523,8 @@ function cmdWire(args) {
     for (const s of ["offload", "caveman", "start"]) {
       copyDir(path.join(HOME, "skills", s), path.join(proj, ".claude", "skills", s));
     }
-    // SessionStart hook: starts PostgreSQL if needed and injects the offload
-    // directives as context. Deterministic, unlike skill matching, and it
+    // SessionStart hook: injects the offload directives as context.
+    // Deterministic, unlike skill matching, and it
     // covers every workflow in the session (BMAD included) without editing
     // any of their files.
     const hookPath = path.join(HOME, "hooks", "session-start.mjs");

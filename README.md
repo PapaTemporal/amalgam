@@ -102,9 +102,10 @@ reassembly; llama-server loads part 1 and finds part 2 itself.
 
 External fallbacks (public hosts, used automatically when the release is
 unreachable): llama.cpp from
-<https://github.com/ggml-org/llama.cpp/releases> (tag b10532), PostgreSQL
-from <https://get.enterprisedb.com/postgresql/>, and the model as a single
-file from
+<https://github.com/ggml-org/llama.cpp/releases> (tag b10532), the embedding
+model from
+<https://huggingface.co/CompendiumLabs/bge-small-en-v1.5-gguf>, and the
+generation model as a single file from
 <https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf>
 (mirror: swap `huggingface.co` for `hf-mirror.com`) saved to
 `~/.amalgam/models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf` — the single file
@@ -267,7 +268,7 @@ GIT      branch main | 3 uncommitted change(s)
 STREAMS  none
 BMAD     installed | 49 bmad skills | output _bmad-output
 GRAPH    built (C:\Users\kinth\code\MuseScore\graphify-out\graph.json)
-SERVICES postgres up
+RUNTIME  memory=sqlite (no service) model=installed
 ```
 
 ## Work streams (parallel work, and cleaning up after it)
@@ -339,7 +340,6 @@ are Windows zips. On Linux/macOS place equivalents manually, then use
 normally:
 
 - llama.cpp build for your platform → `~/.amalgam/runtime/llama/`
-- PostgreSQL binaries → `~/.amalgam/runtime/pgsql/` (so `bin/psql` exists)
 - the same GGUF model → `~/.amalgam/models/`
 
 ## Env overrides

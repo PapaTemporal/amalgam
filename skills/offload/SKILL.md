@@ -5,9 +5,16 @@ description: Use local offload stack (amalgam MCP) to minimize frontier-model co
 
 # Offload — spend local compute, not context tokens
 
-The amalgam MCP server provides local memory (PostgreSQL), a local small model
-(caveman compress/expand), and local code graphs (graphify). Everything runs on
-127.0.0.1. Prefer these over burning context.
+The amalgam MCP server provides local memory (SQLite, searched by meaning and
+keyword), a local small model (`digest`, and caveman compress/expand), and
+local code graphs (graphify). Everything runs on this machine. Prefer these
+over burning context.
+
+- `memory_recall` finds memories even when your wording shares no words with
+  them, so search by intent rather than guessing stored phrasing.
+- `digest` reads a long file or verbose command output and returns only a
+  dense summary — the raw text never enters your context. Reach for it before
+  reading anything bulky in full.
 
 ## Session start (do this once, cheaply)
 
