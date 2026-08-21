@@ -109,6 +109,43 @@ uv tool run --from graphifyy graphify . --code-only
 `--code-only` matters: it keeps graphify on its local tree-sitter path — the
 docs/media pass would call a cloud LLM, which this stack forbids.
 
+## Work streams (parallel work, and cleaning up after it)
+
+With AI you often have several things in flight. Each one can get its own
+**stream** — a git worktree plus branch — so builds, edits, and test runs
+never collide, including with the checkout you have open yourself.
+
+```bash
+amalgam stream new automation-tab --repo C:\path\to\repo --purpose "fix automation panel"
+# -> creates ..\repo-automation-tab on branch stream/automation-tab
+```
+
+Because compiled worktrees are expensive (a C++ build dir is gigabytes),
+streams are designed to be **reclaimed**, not accumulated:
+
+```bash
+amalgam stream list        # every stream + why it is (or isn't) reclaimable
+amalgam stream done <name> # "I evaluated this" -> now reclaimable
+amalgam stream gc          # print the reclaim plan (nothing is deleted)
+amalgam stream gc --yes    # execute it
+amalgam stream drop <name> # remove one now
+```
+
+`gc` applies four policies, in this order:
+
+| Situation | Action |
+|---|---|
+| Real uncommitted changes | **kept** — never auto-removed |
+| Pinned (`--pin`, e.g. a nightly job's warm build dir) | **kept** |
+| Branch merged into base | worktree removed, merged branch deleted |
+| Marked `done` but unmerged | worktree removed, **branch kept** (commits survive) |
+| Stale (no commits in N days, default 14) but still open | **build dirs freed only**, code kept |
+
+Build output never counts as "dirty" (otherwise every compiled worktree
+would be unreclaimable forever), but any real untracked or modified file
+does. `--builds-only` reclaims space without removing worktrees;
+`--max-age-days N` tunes staleness.
+
 ## MCP tools
 
 | Tool | Layer | Purpose |

@@ -452,6 +452,282 @@ function cmdWire(args) {
   }
 }
 
+// ================================================================ streams
+// Parallel work streams as git worktrees. Each stream is an isolated
+// checkout so concurrent AI sessions never fight over one working tree.
+//
+// Worktrees that get compiled are expensive (a C++ build dir is GBs), so
+// they are treated as reclaimable: every stream carries enough state to
+// decide, later and without a human remembering, whether it can be freed.
+
+const STREAMS_DB = path.join(HOME, "streams.json");
+// Build output dirs to reclaim. Matched at the worktree root only.
+const BUILD_DIR_RE = /^(build|build[-.].*|.*\.build|cmake-build-.*|out|target|node_modules)$/i;
+
+function git(repo, args, opts = {}) {
+  const r = spawnSync("git", ["-C", repo, ...args], { encoding: "utf8", ...opts });
+  return { ok: r.status === 0, out: (r.stdout ?? "").trim(), err: (r.stderr ?? "").trim() };
+}
+
+function readStreams() {
+  try { return JSON.parse(fs.readFileSync(STREAMS_DB, "utf8")); } catch { return { streams: {} }; }
+}
+function writeStreams(db) {
+  fs.mkdirSync(path.dirname(STREAMS_DB), { recursive: true });
+  fs.writeFileSync(STREAMS_DB, JSON.stringify(db, null, 2) + "\n");
+}
+const streamKey = (repo, name) => `${path.basename(repo)}::${name}`;
+
+function dirSize(dir) {
+  let total = 0;
+  try {
+    for (const e of fs.readdirSync(dir, { recursive: true, withFileTypes: true })) {
+      if (!e.isFile()) continue;
+      try { total += fs.statSync(path.join(e.parentPath ?? e.path, e.name)).size; } catch {}
+    }
+  } catch {}
+  return total;
+}
+const human = (b) => (b > 1e9 ? `${(b / 1e9).toFixed(1)} GB` : b > 1e6 ? `${(b / 1e6).toFixed(0)} MB` : `${(b / 1e3).toFixed(0)} KB`);
+
+function buildDirs(worktree) {
+  try {
+    return fs.readdirSync(worktree, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && BUILD_DIR_RE.test(e.name))
+      .map((e) => path.join(worktree, e.name));
+  } catch { return []; }
+}
+
+/** Everything needed to judge whether a stream is still worth its disk. */
+function inspectStream(rec, { sizes = true } = {}) {
+  const exists = fs.existsSync(rec.path);
+  const st = { ...rec, exists, dirty: false, merged: false, ageDays: null, builds: [], buildBytes: 0, unmergedCommits: 0 };
+  if (!exists) return st;
+  // "Dirty" must mean work at risk, not build output. Untracked files inside
+  // a build dir are expected in any compiled worktree; counting them would
+  // make every built stream permanently unreclaimable.
+  st.dirty = git(rec.path, ["status", "--porcelain"]).out
+    .split("\n").filter(Boolean)
+    .some((line) => {
+      const p = line.slice(3).replace(/^"|"$/g, "");
+      if (!line.startsWith("??")) return true;             // tracked change
+      return !BUILD_DIR_RE.test(p.split("/")[0]);          // untracked non-build file
+    });
+  st.merged = git(rec.repo, ["merge-base", "--is-ancestor", rec.branch, rec.base]).ok;
+  const last = git(rec.path, ["log", "-1", "--format=%ct"]).out;
+  if (last) st.ageDays = Math.floor((Date.now() / 1000 - Number(last)) / 86400);
+  const ahead = git(rec.repo, ["rev-list", "--count", `${rec.base}..${rec.branch}`]).out;
+  st.unmergedCommits = Number(ahead || 0);
+  st.builds = buildDirs(rec.path);
+  if (sizes) st.buildBytes = st.builds.reduce((n, d) => n + dirSize(d), 0);
+  return st;
+}
+
+/**
+ * Reclamation policy. Two tiers, because losing a build dir costs time while
+ * losing an unmerged worktree costs work:
+ *   remove  — whole worktree: merged, or explicitly evaluated; never dirty
+ *   builds  — free build output only, keep the code: stale but still open
+ */
+function classify(st, maxAgeDays) {
+  if (!st.exists) return { action: "forget", why: "worktree directory is gone" };
+  if (st.dirty) return { action: "keep", why: "uncommitted changes — never auto-removed" };
+  // Pinned streams keep their (expensive) warm build dir across cycles —
+  // e.g. the nightly worktree, where a cold rebuild costs far more than disk.
+  if (st.pinned) return { action: "keep", why: "pinned (persistent worktree)" };
+  if (st.merged) return { action: "remove", why: `merged into ${st.base}` };
+  if (st.evaluated) return { action: "remove", why: `marked done ${st.evaluatedAt?.slice(0, 10) ?? ""}`.trim() };
+  if (st.ageDays !== null && st.ageDays >= maxAgeDays) {
+    return st.buildBytes > 0
+      ? { action: "builds", why: `no commits in ${st.ageDays}d, ${st.unmergedCommits} unmerged commit(s) kept` }
+      : { action: "keep", why: `stale (${st.ageDays}d) but nothing to reclaim` };
+  }
+  return { action: "keep", why: "active" };
+}
+
+function cmdStream(args) {
+  const [sub, ...rest] = args;
+  const flag = (n) => rest.includes(n);
+  const opt = (n, d = null) => { const i = rest.indexOf(n); return i >= 0 ? rest[i + 1] : d; };
+  const repo = path.resolve(opt("--repo", process.cwd()));
+  const db = readStreams();
+
+  const requireRepo = () => {
+    if (!git(repo, ["rev-parse", "--git-dir"]).ok) {
+      console.error(`Not a git repository: ${repo}  (pass --repo <path>)`);
+      process.exit(1);
+    }
+  };
+
+  switch (sub) {
+    case "new": {
+      requireRepo();
+      const name = rest[0];
+      if (!name || name.startsWith("--")) { console.error("usage: amalgam stream new <name> [--repo <path>] [--base <branch>] [--purpose \"...\"]"); process.exit(1); }
+      const base = opt("--base", "main");
+      const branch = `stream/${name}`;
+      const wt = path.resolve(repo, "..", `${path.basename(repo)}-${name}`);
+      if (fs.existsSync(wt)) { console.error(`Path already exists: ${wt}`); process.exit(1); }
+      const r = git(repo, ["worktree", "add", "-b", branch, wt, base]);
+      if (!r.ok) { console.error(r.err || "git worktree add failed"); process.exit(1); }
+      db.streams[streamKey(repo, name)] = {
+        name, repo, path: wt, branch, base,
+        purpose: opt("--purpose", ""),
+        created: new Date().toISOString(),
+        evaluated: false, evaluatedAt: null,
+        pinned: flag("--pin"),
+      };
+      writeStreams(db);
+      console.log(`Stream '${name}' ready.
+  worktree : ${wt}
+  branch   : ${branch} (from ${base})
+Work there in its own session. Tag memories with context "${path.basename(repo)}/${name}".
+When you have judged the result:  amalgam stream done ${name} --repo ${repo}`);
+      break;
+    }
+
+    case "list": {
+      const recs = Object.values(db.streams).filter((s) => !flag("--all") ? true : true);
+      if (recs.length === 0) { console.log("No streams registered."); break; }
+      const withSizes = !flag("--fast");
+      const maxAge = Number(opt("--max-age-days", 14));
+      console.log(withSizes ? "Measuring build dirs (use --fast to skip) ...\n" : "");
+      for (const rec of recs) {
+        const st = inspectStream(rec, { sizes: withSizes });
+        const { action, why } = classify(st, maxAge);
+        const tag = { keep: "ACTIVE", builds: "RECLAIM BUILDS", remove: "RECLAIMABLE", forget: "MISSING" }[action];
+        console.log(`${st.name}  [${tag}]`);
+        console.log(`  path    : ${st.path}${st.exists ? "" : "  (gone)"}`);
+        console.log(`  branch  : ${st.branch}  ${st.merged ? "(merged)" : `(${st.unmergedCommits} unmerged)`}${st.dirty ? "  DIRTY" : ""}`);
+        if (st.purpose) console.log(`  purpose : ${st.purpose}`);
+        console.log(`  activity: ${st.ageDays === null ? "no commits" : `${st.ageDays}d since last commit`}`);
+        if (withSizes && st.buildBytes) console.log(`  builds  : ${human(st.buildBytes)} in ${st.builds.length} dir(s)`);
+        console.log(`  verdict : ${why}\n`);
+      }
+      console.log("Reclaim with:  amalgam stream gc            (plan only)\n               amalgam stream gc --yes      (execute)");
+      break;
+    }
+
+    case "done": {
+      const name = rest[0];
+      const key = streamKey(repo, name);
+      if (!db.streams[key]) { console.error(`Unknown stream '${name}' in ${repo}`); process.exit(1); }
+      db.streams[key].evaluated = true;
+      db.streams[key].evaluatedAt = new Date().toISOString();
+      writeStreams(db);
+      console.log(`Stream '${name}' marked done — it is now reclaimable by 'amalgam stream gc'.`);
+      break;
+    }
+
+    case "pin":
+    case "unpin": {
+      const name = rest[0];
+      const key = streamKey(repo, name);
+      if (!db.streams[key]) { console.error(`Unknown stream '${name}' in ${repo}`); process.exit(1); }
+      db.streams[key].pinned = sub === "pin";
+      writeStreams(db);
+      console.log(`Stream '${name}' ${sub === "pin" ? "pinned — gc will keep it and its build dir" : "unpinned — gc may now reclaim it"}.`);
+      break;
+    }
+
+    case "gc": {
+      const execute = flag("--yes");
+      const maxAge = Number(opt("--max-age-days", 14));
+      const buildsOnly = flag("--builds-only");
+      const recs = Object.values(db.streams);
+      if (recs.length === 0) { console.log("No streams registered."); break; }
+      console.log(`${execute ? "Reclaiming" : "Plan (nothing will be deleted — add --yes to execute)"}:\n`);
+      let freed = 0, removed = 0, cleaned = 0;
+      for (const rec of recs) {
+        const st = inspectStream(rec);
+        let { action, why } = classify(st, maxAge);
+        if (buildsOnly && action === "remove") action = st.buildBytes > 0 ? "builds" : "keep";
+        const key = streamKey(rec.repo, rec.name);
+
+        if (action === "keep") { console.log(`  keep    ${st.name} — ${why}`); continue; }
+
+        if (action === "forget") {
+          console.log(`  forget  ${st.name} — ${why}`);
+          if (execute) { git(rec.repo, ["worktree", "prune"]); delete db.streams[key]; }
+          continue;
+        }
+
+        if (action === "builds") {
+          console.log(`  builds  ${st.name} — free ${human(st.buildBytes)} — ${why}`);
+          if (execute) {
+            for (const d of st.builds) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+            freed += st.buildBytes; cleaned++;
+          }
+          continue;
+        }
+
+        // remove: worktree + branch (branch only when truly merged)
+        const total = st.buildBytes;
+        console.log(`  remove  ${st.name} — ${why}${st.buildBytes ? ` — frees ${human(st.buildBytes)}+` : ""}`);
+        if (execute) {
+          // Clear build output first: it is the bulk of the bytes, and git
+          // refuses to remove a worktree containing untracked files. Our own
+          // dirty check (stricter about real work, lenient about build dirs)
+          // already passed, so --force here cannot discard actual work.
+          for (const d of st.builds) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+          let r = git(rec.repo, ["worktree", "remove", st.path]);
+          if (!r.ok) r = git(rec.repo, ["worktree", "remove", "--force", st.path]);
+          if (!r.ok) { console.log(`          ! ${r.err.split("\n")[0]} (skipped)`); continue; }
+          if (st.merged) git(rec.repo, ["branch", "-d", st.branch]);
+          else console.log(`          branch ${st.branch} kept (unmerged work preserved)`);
+          delete db.streams[key];
+          freed += total; removed++;
+        }
+      }
+      if (execute) {
+        writeStreams(db);
+        console.log(`\nDone: ${removed} worktree(s) removed, ${cleaned} build dir set(s) cleared, ~${human(freed)} freed.`);
+      }
+      break;
+    }
+
+    case "drop": {
+      requireRepo();
+      const name = rest[0];
+      const key = streamKey(repo, name);
+      const rec = db.streams[key];
+      if (!rec) { console.error(`Unknown stream '${name}' in ${repo}`); process.exit(1); }
+      const st = inspectStream(rec, { sizes: false });
+      if ((st.dirty || (!st.merged && st.unmergedCommits > 0)) && !flag("--force")) {
+        console.error(`Refusing to drop '${name}': ${st.dirty ? "uncommitted changes" : `${st.unmergedCommits} unmerged commit(s)`}.`);
+        console.error(`Its branch ${st.branch} holds the work. Re-run with --force to discard the worktree anyway (branch is kept unless merged).`);
+        process.exit(1);
+      }
+      const r = git(repo, ["worktree", "remove", ...(flag("--force") ? ["--force"] : []), rec.path]);
+      if (!r.ok) { console.error(r.err); process.exit(1); }
+      if (st.merged) git(repo, ["branch", "-d", rec.branch]);
+      delete db.streams[key];
+      writeStreams(db);
+      console.log(`Dropped stream '${name}'.${st.merged ? "" : ` Branch ${rec.branch} kept.`}`);
+      break;
+    }
+
+    default:
+      console.log(`amalgam stream — parallel work streams as git worktrees
+
+  new <name> [--repo <p>] [--base <branch>] [--purpose "..."] [--pin]
+        create an isolated worktree + branch stream/<name>
+        --pin keeps it (and its warm build dir) safe from gc
+  pin <name> | unpin <name>
+        protect a long-lived worktree from reclamation, or release it
+  list [--fast] [--max-age-days N]
+        show every stream with its reclaim verdict (--fast skips size scan)
+  done <name> [--repo <p>]
+        mark a stream evaluated — makes it reclaimable
+  gc [--yes] [--builds-only] [--max-age-days N]
+        reclaim disk. Prints a plan; --yes executes.
+        Removes worktrees that are merged or marked done (never dirty ones);
+        frees build dirs of stale-but-open streams.
+  drop <name> [--force]
+        remove one stream now (refuses to discard unmerged work without --force)`);
+  }
+}
+
 // ---------------------------------------------------------------- dispatch
 const [cmd, ...rest] = process.argv.slice(2);
 switch (cmd) {
@@ -460,6 +736,7 @@ switch (cmd) {
   case "stop": cmdStop(); break;
   case "status": await cmdStatus(); break;
   case "wire": cmdWire(rest); break;
+  case "stream": cmdStream(rest); break;
   default:
     console.log(`amalgam — local offload stack (memory + caveman compression + code graphs)
 
@@ -469,6 +746,8 @@ Usage:
   amalgam stop                      stop both services
   amalgam status                    health check
   amalgam wire [--claude|--copilot] wire the current project (default: both)
+  amalgam stream <sub>              parallel work streams as git worktrees
+                                    (new | list | done | gc | drop)
 
 Env overrides: AMALGAM_HOME, AMALGAM_PG_PORT, AMALGAM_LLAMA_PORT`);
 }

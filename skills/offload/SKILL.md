@@ -1,6 +1,6 @@
 ---
 name: offload
-description: Use local offload stack (amalgam MCP) to minimize frontier-model context. Trigger at session start, before searching a codebase, and at session end. Also when the user says "remember", "recall", "what do you know about", or asks to save/load context.
+description: Use local offload stack (amalgam MCP) to minimize frontier-model context, and isolate parallel work in git worktree streams. Trigger at session start, before searching a codebase, and at session end. Also when the user says "remember", "recall", "what do you know about", asks to save/load context, or starts work that would collide with other in-flight changes.
 ---
 
 # Offload — spend local compute, not context tokens
@@ -15,6 +15,50 @@ The amalgam MCP server provides local memory (PostgreSQL), a local small model
 2. `memory_recall` with 3-5 keywords about the task at hand — load relevant
    facts (L1) and scenario docs (L2). Read results as-is: they are
    caveman-dense on purpose; do NOT expand them unless showing the user.
+3. If this session is in a stream worktree (directory name `<repo>-<stream>`),
+   recall with that stream's tag first — see Work streams below.
+
+## Work streams (parallel work without collisions)
+
+Several AI sessions may run at once. Each substantial, independent piece of
+work belongs in its own **stream**: a git worktree with its own branch, so
+edits, builds, and test runs in one stream cannot disturb another — or the
+checkout the user has open.
+
+**Start a stream** when work is independent of what else is in flight, will
+take more than a quick edit, or needs to build/test:
+
+```
+amalgam stream new <name> --repo <repo> --purpose "<one line>"
+```
+
+It creates `<repo>-<name>/` on branch `stream/<name>`. Do that work there.
+For a quick edit on an idle repo, plain branches are fine — don't create
+ceremony for a one-line fix.
+
+**Tag memories by stream.** Use `context: "<repo>/<stream>"` on
+`memory_save_fact`, and path scenario docs as `<repo>/<stream>/...`. Streams
+then recall their own context instead of each other's, which is the memory-side
+mirror of the file isolation the worktree gives you.
+
+**Close the loop — this is what keeps disk from leaking.** A built worktree
+can be gigabytes, so a stream must be told when it stops being useful:
+
+- Merged the work into the main branch? It is reclaimable automatically.
+- The user has evaluated the result, or the work is abandoned or superseded?
+  Say so explicitly: `amalgam stream done <name> --repo <repo>`.
+- Run `amalgam stream gc` (plan) / `--yes` (execute) periodically — at session
+  start on a repo with streams, or whenever the user mentions disk space.
+
+Safety rules gc already enforces, so you can run the plan freely: it never
+touches a worktree with real uncommitted changes, never deletes an unmerged
+branch (only the worktree, keeping the commits), keeps pinned streams, and
+frees build output before removing anything. Report the plan to the user
+before executing if any stream shows unmerged commits.
+
+**Long-lived worktrees** (a nightly job's warm build dir) should be created
+with `--pin`, or pinned later with `amalgam stream pin <name>`, so gc leaves
+them and their expensive build directories alone.
 
 ## During work
 
