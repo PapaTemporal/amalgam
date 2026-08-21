@@ -21,7 +21,7 @@ Claude Code / Copilot ──stdio──▶ ~/.amalgam/mcp/server.mjs (zero-dep N
 
 ## Requirements
 
-- **Node 22+** (the only hard prerequisite — it supplies the SQLite the memory
+- **Node 22.5+** (the only hard prerequisite — it supplies the built-in SQLite the memory
   store uses; nothing is installed for it)
 - Optional: [uv](https://docs.astral.sh/uv/) for graphify code-graph queries
 - Optional: the local model (~2.5 GB, Windows x64) for `digest` and `caveman_*`
@@ -29,18 +29,53 @@ Claude Code / Copilot ──stdio──▶ ~/.amalgam/mcp/server.mjs (zero-dep N
 
 ## Install (per machine, once)
 
+Pick **one** of the two routes below — they are alternatives, not steps.
+
+**From a clone** — use this if you want to read or change the code:
+
 ```bash
 git clone https://github.com/papatemporal/amalgam.git
 cd amalgam
-node bin/amalgam.mjs install                 # memory only — nothing to download
-node bin/amalgam.mjs install --with-model    # add the optional local model (~2.5 GB)
+node bin/amalgam.mjs install                    # memory only — downloads nothing
+node bin/amalgam.mjs install --with-embeddings  # + semantic recall (~153 MB)
+node bin/amalgam.mjs install --with-model       # + digest & caveman (~2.5 GB)
 ```
+
+**Without cloning** — npx fetches the repo itself (your git credentials cover
+the private repo):
+
+```bash
+npx github:papatemporal/amalgam install --with-embeddings
+```
+
+The flags are cumulative in effect, not sequential: `--with-model` implies
+`--with-embeddings`, and re-running with a new flag only fetches what is
+missing.
 
 There is no service to start: memory is a SQLite file opened on demand, and
 the model (if installed) starts itself the first time a tool needs it.
 
-Optionally put `bin/` on PATH or use `npx github:papatemporal/amalgam` (works
-with your git credentials; repo can stay private).
+### Typing `amalgam` instead of `node bin/amalgam.mjs`
+
+Every example below writes `amalgam` for brevity. To make that a real command,
+pick whichever suits you:
+
+- **A shell alias** — nothing installed, works immediately.
+  PowerShell (add to `$PROFILE`):
+  ```powershell
+  function amalgam { node C:\path\to\amalgam\bin\amalgam.mjs @args }
+  ```
+  bash/zsh (add to your rc file):
+  ```bash
+  alias amalgam='node /path/to/amalgam/bin/amalgam.mjs'
+  ```
+- **An npm shim** — run `npm link` inside the clone. It writes `amalgam` /
+  `amalgam.cmd` into your **user** npm directory (`%APPDATA%\npm` on Windows),
+  so it needs no admin rights.
+
+Adding `bin/` to your PATH does *not* work: the file is `amalgam.mjs`, and
+Windows will not execute a `.mjs` directly. Otherwise just keep typing
+`node bin/amalgam.mjs …` — every example works that way too.
 
 ### Behind a proxy?
 

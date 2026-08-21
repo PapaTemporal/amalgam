@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 /**
- * Amalgam CLI — install / start / stop / status / wire
+ * Amalgam CLI — install / start / stop / status / stats / wire / stream /
+ * brief / graph / globalize
  *
- * Zero npm dependencies. Node 18+ only prerequisite.
+ * Zero npm dependencies. Node 22.5+ is the only prerequisite (it supplies the
+ * built-in SQLite the memory store uses).
  * Everything lands in AMALGAM_HOME (default ~/.amalgam); the repo/package
  * carries only code. Downloads go through system curl (which honors
  * HTTP_PROXY / HTTPS_PROXY) with a Node-fetch fallback; every failed
