@@ -220,6 +220,35 @@ mixed to answer anything well.
 tree-sitter path — the docs/media pass would call a cloud LLM, which this
 stack forbids.
 
+## Updating
+
+The agent does not run this repo directly: `install` copies the code into
+`~/.amalgam`, and `wire` copies the skills again into `~/.claude` and into each
+wired project. So `git pull` on its own changes nothing that actually runs.
+
+```bash
+amalgam update      # pull, re-deploy, and refresh every copy that was wired
+amalgam version     # what is deployed vs. what this source has
+```
+
+`update` pulls the clone (skipped automatically when you have local changes),
+re-deploys the payload, then refreshes user-scope wiring and every project it
+recorded at wire time. Restart open agent sessions afterwards — skills, hooks,
+and MCP servers are read once at session start.
+
+`version` reports drift on its own:
+
+```text
+amalgam 0.1.0 (350ef61)
+source   : /path/to/amalgam-pkg
+installed: 0.1.0 (0000000) on 2026-08-21 -> /home/you/.amalgam
+
+The deployed copy is behind this source. Run: amalgam update
+```
+
+Installed with npx rather than a clone? Re-run the same npx command — it
+fetches the latest each time.
+
 ## Semantic recall
 
 With `--with-embeddings` (~153 MB total), memory is searched by **meaning as
