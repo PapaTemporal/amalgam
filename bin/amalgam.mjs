@@ -15,14 +15,13 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
+import { ensureLlama, llamaHealthy, modelInstalled, LLAMA_PORT } from "../lib/services.mjs";
+import { open as openDb } from "../lib/db.mjs";
+
 const PKG = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HOME = process.env.AMALGAM_HOME ?? path.join(os.homedir(), ".amalgam");
 const WIN = process.platform === "win32";
-const PG_PORT = process.env.AMALGAM_PG_PORT ?? "5455";
-const LLAMA_PORT = process.env.AMALGAM_LLAMA_PORT ?? "8642";
 const exe = (p) => (WIN ? `${p}.exe` : p);
-const pgBin = (name) => path.join(HOME, "runtime", "pgsql", "bin", exe(name));
-const pgData = path.join(HOME, "data", "pg");
 const MODEL_FILE = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf";
 
 // ------------------------------------------------------------- download plan
@@ -46,6 +45,9 @@ const MODEL_PARTS = [
   "Qwen3-4B-Instruct-2507-Q4_K_M-00002-of-00002.gguf",
 ];
 
+// Memory is SQLite via Node's built-in module: nothing to download for it.
+// Only the optional model path has payloads, and they are skipped unless the
+// user asks for them with --with-model.
 const DOWNLOADS = [
   {
     id: "llama.cpp (portable CPU build)",
@@ -55,20 +57,8 @@ const DOWNLOADS = [
     extractTo: path.join(HOME, "runtime", "llama"),
     check: path.join(HOME, "runtime", "llama", exe("llama-server")),
     winOnly: true,
+    modelOnly: true,
     approx: "~90 MB",
-  },
-  {
-    id: "PostgreSQL 17.5 (portable binaries)",
-    asset: "postgresql-17.5-1-windows-x64-binaries.zip",
-    url: "https://get.enterprisedb.com/postgresql/postgresql-17.5-1-windows-x64-binaries.zip",
-    archive: path.join(HOME, "downloads", "postgresql-17.5-1-windows-x64-binaries.zip"),
-    extractTo: path.join(HOME, "runtime"), // zip contains pgsql/
-    // Skip pgAdmin/docs/etc: unneeded, huge, and their deep paths can
-    // exceed Windows' 260-char limit. bin+lib+share is a complete server.
-    extractMembers: ["pgsql/bin/*", "pgsql/lib/*", "pgsql/share/*"],
-    check: pgBin("psql"),
-    winOnly: true,
-    approx: "~300 MB",
   },
   {
     id: "Qwen3-4B model (split 1/2)",
@@ -78,6 +68,7 @@ const DOWNLOADS = [
     // present if the original single-file model exists instead
     altCheck: path.join(HOME, "models", MODEL_FILE),
     winOnly: false,
+    modelOnly: true,
     approx: "~1.8 GB",
   },
   {
@@ -87,6 +78,7 @@ const DOWNLOADS = [
     check: path.join(HOME, "models", MODEL_PARTS[1]),
     altCheck: path.join(HOME, "models", MODEL_FILE),
     winOnly: false,
+    modelOnly: true,
     approx: "~0.6 GB",
   },
 ];
@@ -251,12 +243,14 @@ async function cmdInstall(args) {
 
   fs.mkdirSync(HOME, { recursive: true });
   // 1) code payload → HOME (so project wiring never depends on where the repo clone lives)
-  for (const dir of ["mcp", "sql", "skills", "lib", "hooks"]) copyDir(path.join(PKG, dir), path.join(HOME, dir));
+  for (const dir of ["mcp", "skills", "lib", "hooks"]) copyDir(path.join(PKG, dir), path.join(HOME, dir));
   console.log(`Code payload copied to ${HOME}`);
 
   // 2) fetch + extract runtimes/model
   const failed = [];
+  const withModel = args.includes("--with-model");
   for (const d of DOWNLOADS) {
+    if (d.modelOnly && !withModel) continue;
     if (d.winOnly && !WIN) continue;
     if (fs.existsSync(d.check) || (d.altCheck && fs.existsSync(d.altCheck))) {
       console.log(`  [ok] ${d.id} already present`);
@@ -298,93 +292,76 @@ async function cmdInstall(args) {
     process.exit(1);
   }
 
-  // 3) initdb (first run only)
-  if (WIN && !fs.existsSync(path.join(pgData, "PG_VERSION"))) {
-    console.log("Initializing PostgreSQL data directory ...");
-    const r = spawnSync(pgBin("initdb"), ["-D", pgData, "-U", os.userInfo().username, "-A", "trust", "-E", "UTF8", "--no-instructions"], { stdio: ["ignore", "ignore", "inherit"] });
-    if (r.status !== 0) {
-      console.error("initdb failed");
-      process.exit(1);
-    }
+  // Memory needs no initialization step: the SQLite file and its schema are
+  // created on first use by lib/db.mjs.
+  console.log("\nInstall complete. Next, in each project:  amalgam wire");
+  if (!modelInstalled()) {
+    console.log("(The optional local model was not installed. `digest` and `caveman_*`");
+    console.log(" stay unavailable until you run: amalgam install --with-model)");
   }
-  console.log("\nInstall complete. Next:  amalgam start   then in each project:  amalgam wire");
 }
 
+/**
+ * Kept for the one optional service. Memory is a file, so there is nothing to
+ * start for it — this only warms the model so the first digest is not slow.
+ */
 async function cmdStart() {
-  // PostgreSQL — spawn detached with ignored stdio (the daemon inherits
-  // handles; piping them hangs the parent shell).
-  if (!pgRunning()) {
-    console.log(`Starting PostgreSQL on 127.0.0.1:${PG_PORT} ...`);
-    const r = spawnSync(
-      pgBin("pg_ctl"),
-      ["-D", pgData, "-o", `-p ${PG_PORT} -c listen_addresses=127.0.0.1`, "-l", path.join(HOME, "data", "pg.log"), "-w", "start"],
-      { stdio: ["ignore", "ignore", "inherit"] }
-    );
-    if (r.status !== 0 || !pgRunning()) {
-      console.error(`PostgreSQL failed to start — see ${path.join(HOME, "data", "pg.log")}`);
-      process.exit(1);
-    }
-  } else console.log("PostgreSQL already running.");
-
-  // DB + schema, idempotent
-  const has = spawnSync(pgBin("psql"), ["-h", "127.0.0.1", "-p", PG_PORT, "-d", "postgres", "-tA", "-c", "SELECT 1 FROM pg_database WHERE datname='amalgam'"], { encoding: "utf8" });
-  if (!has.stdout?.includes("1")) {
-    spawnSync(pgBin("createdb"), ["-h", "127.0.0.1", "-p", PG_PORT, "amalgam"], { stdio: "inherit" });
-    console.log("Created database 'amalgam'.");
+  if (!modelInstalled()) {
+    console.log("Nothing to start: memory is a local SQLite file, and the optional model is not installed.");
+    console.log("Install it with `amalgam install --with-model` if you want digest / caveman tools.");
+    return;
   }
-  spawnSync(pgBin("psql"), ["-h", "127.0.0.1", "-p", PG_PORT, "-d", "amalgam", "-q", "-f", path.join(HOME, "sql", "schema.sql")], { stdio: ["ignore", "ignore", "inherit"] });
-  console.log("Schema ensured.");
-
-  // llama.cpp
-  if (await httpGet(`http://127.0.0.1:${LLAMA_PORT}/health`)) {
-    console.log("llama-server already running.");
-  } else {
-    console.log(`Starting llama-server on 127.0.0.1:${LLAMA_PORT} (CPU) ...`);
-    // Model may exist as the original single file or as a llama.cpp split
-    // GGUF (release-asset form). llama-server loads the rest of a split
-    // automatically when pointed at part 1.
-    const singleModel = path.join(HOME, "models", MODEL_FILE);
-    const splitModel = path.join(HOME, "models", MODEL_PARTS[0]);
-    const modelPath = fs.existsSync(singleModel) ? singleModel : splitModel;
-    if (!fs.existsSync(modelPath)) {
-      console.error(`No model found in ${path.join(HOME, "models")} — run 'amalgam install' first.`);
-      process.exit(1);
-    }
-    const child = spawn(
-      path.join(HOME, "runtime", "llama", exe("llama-server")),
-      ["-m", modelPath, "--host", "127.0.0.1", "--port", LLAMA_PORT, "-c", "8192", "--threads", String(Math.max(2, os.cpus().length - 2))],
-      { detached: true, stdio: "ignore", windowsHide: true }
-    );
-    child.unref();
-    process.stdout.write("  waiting for model load ");
-    const deadline = Date.now() + 120000;
-    let ok = false;
-    while (Date.now() < deadline) {
-      const h = await httpGet(`http://127.0.0.1:${LLAMA_PORT}/health`);
-      if (h && h.includes("ok")) { ok = true; break; }
-      process.stdout.write(".");
-      await new Promise((r) => setTimeout(r, 3000));
-    }
-    console.log(ok ? " ready." : " still loading — check `amalgam status` in a minute.");
+  if (await llamaHealthy()) console.log("llama-server already running.");
+  else {
+    process.stdout.write(`Starting llama-server on 127.0.0.1:${LLAMA_PORT} (CPU), loading model `);
+    const ok = await ensureLlama(180000);
+    console.log(ok ? "— ready." : "— still loading; check `amalgam status`.");
   }
-  console.log("Amalgam stack is up.");
 }
 
 function cmdStop() {
   if (WIN) spawnSync("taskkill", ["/IM", "llama-server.exe", "/F"], { stdio: "ignore" });
   else spawnSync("pkill", ["-f", "llama-server"], { stdio: "ignore" });
-  console.log("llama-server stopped (if it was running).");
-  spawnSync(pgBin("pg_ctl"), ["-D", pgData, "-m", "fast", "stop"], { stdio: ["ignore", "ignore", "inherit"] });
-  console.log("PostgreSQL stopped (if it was running).");
+  console.log("llama-server stopped (if it was running). Memory needs no shutdown.");
 }
 
 async function cmdStatus() {
   console.log(`AMALGAM_HOME: ${HOME}`);
-  console.log(`PostgreSQL  : ${pgRunning() ? `OK (port ${PG_PORT})` : "not running"}`);
-  const h = await httpGet(`http://127.0.0.1:${LLAMA_PORT}/health`);
-  console.log(`llama-server: ${h?.includes("ok") ? `OK (port ${LLAMA_PORT})` : "not running / still loading"}`);
+  const dbFile = path.join(HOME, "data", "memory.db");
+  const size = fs.existsSync(dbFile) ? `${(fs.statSync(dbFile).size / 1e6).toFixed(1)} MB` : "not created yet";
+  console.log(`memory      : SQLite (${dbFile}) — ${size}`);
+  console.log(`local model : ${!modelInstalled() ? "not installed (optional)" : (await llamaHealthy()) ? `running (port ${LLAMA_PORT})` : "installed, not running (starts on first use)"}`);
   const uv = spawnSync("uv", ["--version"], { encoding: "utf8" });
-  console.log(`uv (graphify): ${uv.status === 0 ? uv.stdout.trim() : "uv not found — graph_query build/query unavailable"}`);
+  console.log(`uv (graphify): ${uv.status === 0 ? uv.stdout.trim() : "uv not found — graph build/query unavailable"}`);
+}
+
+/**
+ * Usage report. Only measured quantities — no invented counterfactuals — so
+ * the project's premise can be judged on data.
+ */
+function cmdStats() {
+  const d = openDb();
+  const rows = d.prepare(
+    `SELECT tool, count(*) AS calls, sum(in_chars) AS in_chars, sum(out_chars) AS out_chars
+       FROM usage_log GROUP BY tool ORDER BY calls DESC`).all();
+  if (rows.length === 0) {
+    console.log("No tool usage recorded yet.");
+    console.log("(Usage is logged from the MCP server; this tells you whether the offload tools are actually being used.)");
+    return;
+  }
+  const est = (chars) => Math.round(chars / 4); // ~4 chars/token, rough but consistent
+  console.log("tool              calls    returned (est. tokens)   note");
+  for (const r of rows) {
+    const note = r.tool === "caveman_compress" || r.tool === "digest"
+      ? `input ${est(r.in_chars)} tok -> ${est(r.out_chars)} tok (${Math.round((1 - r.out_chars / Math.max(r.in_chars, 1)) * 100)}% smaller, measured)`
+      : "context loaded locally instead of by reading files";
+    console.log(`${r.tool.padEnd(18)}${String(r.calls).padEnd(9)}${String(est(r.out_chars)).padEnd(25)}${note}`);
+  }
+  const counts = d.prepare(
+    `SELECT (SELECT count(*) FROM l1_facts) f, (SELECT count(*) FROM l2_scenarios) s, (SELECT count(*) FROM l0_log) l`).get();
+  console.log(`\nstored: ${counts.f} facts, ${counts.s} scenario docs, ${counts.l} log entries`);
+  console.log("Reduction figures are measured on real calls. Everything else is volume, not savings:");
+  console.log("no counterfactual run is recorded, so treat those as usage evidence only.");
 }
 
 function mergeJsonFile(file, mutate) {
@@ -763,7 +740,7 @@ function cmdBrief(args) {
       : `current (built ${gst.builtAt.toISOString().slice(0, 10)})`}`);
 
   // --- services ---
-  L.push(`RUNTIME  postgres ${pgRunning() ? "up" : "down (auto-starts on first memory call)"}`);
+  L.push(`RUNTIME  memory=sqlite (no service) model=${modelInstalled() ? "installed" : "not installed (optional)"}`);
 
   console.log(L.join("\n"));
 }
@@ -1051,6 +1028,7 @@ switch (cmd) {
   case "start": await cmdStart(); break;
   case "stop": cmdStop(); break;
   case "status": await cmdStatus(); break;
+  case "stats": cmdStats(); break;
   case "wire": cmdWire(rest); break;
   case "stream": cmdStream(rest); break;
   case "brief": cmdBrief(rest); break;
@@ -1060,10 +1038,12 @@ switch (cmd) {
     console.log(`amalgam — local offload stack (memory + caveman compression + code graphs)
 
 Usage:
-  amalgam install [--cache <dir>]   download portable runtimes + model into ~/.amalgam
-  amalgam start                     start PostgreSQL + llama-server (idempotent)
-  amalgam stop                      stop both services
+  amalgam install [--with-model]    set up ~/.amalgam. Memory needs no download;
+                 [--cache <dir>]    --with-model adds the optional local model (~2.5 GB)
+  amalgam start                     warm the optional model (memory needs no service)
+  amalgam stop                      stop the model if running
   amalgam status                    health check
+  amalgam stats                     measured tool usage — is any of this earning its keep?
   amalgam wire [--claude|--copilot] wire the current project (default: both)
   amalgam wire --user               wire once for EVERY project on this machine
                                     (skills + hook + MCP at user scope)
@@ -1077,5 +1057,5 @@ Usage:
   amalgam graph [repo] [--check]    build/refresh a local code graph
                                     (--check reports staleness only)
 
-Env overrides: AMALGAM_HOME, AMALGAM_PG_PORT, AMALGAM_LLAMA_PORT`);
+Env overrides: AMALGAM_HOME, AMALGAM_DB, AMALGAM_LLAMA_PORT`);
 }

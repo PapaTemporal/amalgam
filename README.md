@@ -12,49 +12,52 @@ Claude Code / Copilot ──stdio──▶ ~/.amalgam/mcp/server.mjs (zero-dep N
                                     │
                 ┌───────────────────┼─────────────────────┐
                 ▼                   ▼                     ▼
-          PostgreSQL 17       llama.cpp + Qwen3-4B   graphify (via uv)
-          portable, :5455     portable CPU, :8642    tree-sitter, no LLM
-          L0 log / L1 facts   caveman_compress       graph explain/path/query
-          L2 scenarios        caveman_expand
+          SQLite (built in)   llama.cpp + Qwen3-4B    graphify (via uv)
+          one file, no daemon OPTIONAL, :8642     tree-sitter, no LLM
+          L0 log / L1 facts   digest (bulk -> dense)  graph explain/path/query
+          L2 scenarios        caveman compress/expand
           L3 persona
 ```
 
 ## Requirements
 
-- **Node 18+** (the only hard prerequisite)
-- Windows x64 fully supported; Linux/macOS need manual runtime placement (see below)
+- **Node 22+** (the only hard prerequisite — it supplies the SQLite the memory
+  store uses; nothing is installed for it)
 - Optional: [uv](https://docs.astral.sh/uv/) for graphify code-graph queries
-- ~3 GB disk in `~/.amalgam` (runtimes + model), no admin rights needed
+- Optional: the local model (~2.5 GB, Windows x64) for `digest` and `caveman_*`
+- Default install writes a few hundred KB and needs no admin rights
 
 ## Install (per machine, once)
 
 ```bash
 git clone https://github.com/papatemporal/amalgam.git
 cd amalgam
-node bin/amalgam.mjs install     # downloads runtimes + model into ~/.amalgam
-node bin/amalgam.mjs start       # starts PostgreSQL + llama-server
+node bin/amalgam.mjs install                 # memory only — nothing to download
+node bin/amalgam.mjs install --with-model    # add the optional local model (~2.5 GB)
 ```
+
+There is no service to start: memory is a SQLite file opened on demand, and
+the model (if installed) starts itself the first time a tool needs it.
 
 Optionally put `bin/` on PATH or use `npx github:papatemporal/amalgam` (works
 with your git credentials; repo can stay private).
 
-### Behind a proxy? Everything is on the release page.
+### Behind a proxy?
 
-Every runtime and the model are published as **release assets on this repo**
-(see [Releases](https://github.com/PapaTemporal/amalgam/releases)), so a
-machine that can reach github.com needs no other host. The installer tries,
-in order: release asset via `gh` CLI → release asset via token
-(`AMALGAM_GITHUB_TOKEN` or `GITHUB_TOKEN` env var) → the external URLs below
-via `curl` (which honors `HTTP_PROXY`/`HTTPS_PROXY`).
+The default install downloads **nothing**, so proxies are irrelevant to it.
+They matter only for `--with-model`, whose payloads are published as **release
+assets on this repo** (see [Releases](https://github.com/PapaTemporal/amalgam/releases)).
+The installer tries: release asset via `gh` CLI → release asset via token
+(`AMALGAM_GITHUB_TOKEN` or `GITHUB_TOKEN`) → the external URLs below via
+`curl` (which honors `HTTP_PROXY`/`HTTPS_PROXY`).
 
 **No gh, no token? Use your browser** (works for this private repo while
 logged in to GitHub): open the release page, download the assets, save them
-to the paths below, then re-run `amalgam install`:
+to the paths below, then re-run `amalgam install --with-model`:
 
 | Release asset | Save to |
 |---|---|
 | `llama-cpu-x64.zip` (~90 MB) | `~/.amalgam/downloads/llama-cpu-x64.zip` |
-| `postgresql-17.5-1-windows-x64-binaries.zip` (~300 MB) | `~/.amalgam/downloads/postgresql-17.5-1-windows-x64-binaries.zip` |
 | `Qwen3-4B-Instruct-2507-Q4_K_M-00001-of-00002.gguf` (~1.8 GB) | `~/.amalgam/models/` (same filename) |
 | `Qwen3-4B-Instruct-2507-Q4_K_M-00002-of-00002.gguf` (~0.6 GB) | `~/.amalgam/models/` (same filename) |
 
@@ -138,34 +141,41 @@ Nothing is installed into a service repo. A service keeps only its own code
 - **Copilot**: writes `.vscode/mcp.json` (agent-mode MCP) and appends a
   marker-fenced guidance block to `.github/copilot-instructions.md`.
 
-**After wiring, it runs itself.** The SessionStart hook starts PostgreSQL if
-the machine rebooted and injects the offload directives as session context —
-deterministic, unlike skill description matching, and it reaches every
-workflow in the session including BMAD skills, without modifying any of them.
-The MCP server is self-healing: a memory call with PostgreSQL down starts it
-and retries, and `caveman_*` starts llama-server on first use. llama stays
-down until something actually needs it, so idle sessions do not pay its
-~3.6 GB. Day to day you should never need to run `amalgam start` by hand.
+**After wiring, it runs itself.** The SessionStart hook injects the offload
+directives as session context — deterministic, unlike skill description
+matching, and it reaches every workflow in the session including BMAD skills,
+without modifying any of them. Nothing needs starting: memory is a file, and
+the optional model loads on the first tool that needs it, so idle sessions
+never pay its ~3.6 GB of RAM.
 
 Both merge — existing config in those files is preserved.
 
 ## Daily use
 
 ```bash
-node bin/amalgam.mjs start    # after reboot; idempotent
-node bin/amalgam.mjs status   # health check
-node bin/amalgam.mjs stop
+node bin/amalgam.mjs status   # what is present and running
+node bin/amalgam.mjs stats    # measured tool usage — is this earning its keep?
+node bin/amalgam.mjs graph    # build/refresh this repo's code graph
 ```
 
-Build a code graph once per repo (queries are then instant and local):
+`amalgam graph` wraps graphify with `--code-only`, which keeps it on its local
+tree-sitter path — the docs/media pass would call a cloud LLM, which this
+stack forbids.
 
-```bash
-cd your-repo
-uv tool run --from graphifyy graphify . --code-only
+## Does it actually save context?
+
+`amalgam stats` reports only measured quantities, so the premise can be
+checked rather than asserted:
+
+```text
+tool              calls    returned (est. tokens)   note
+digest            2        1292                     input 14515 tok -> 1292 tok (91% smaller, measured)
+memory_recall     1        330                      context loaded locally instead of by reading files
 ```
 
-`--code-only` matters: it keeps graphify on its local tree-sitter path — the
-docs/media pass would call a cloud LLM, which this stack forbids.
+Reduction percentages are real before/after measurements on actual calls.
+Everything else is reported as *volume*, not savings — no counterfactual was
+run, so those numbers are evidence of use, not proof of benefit.
 
 ## Starting a session: `/start`
 
@@ -245,8 +255,21 @@ does. `--builds-only` reclaims space without removing worktrees;
 | `memory_log` | L0 | Verbatim conversation audit trail |
 | `memory_context_write/read/list` | L2 | Durable per-project scenario docs |
 | `memory_persona_read/write` | L3 | Stable user profile |
-| `caveman_compress/expand` | — | Local Qwen3-4B dense↔readable translation |
+| `digest` | — | Read a large file or command output and return only a dense digest — the raw text never enters the agent's context (needs the optional model) |
+| `caveman_compress/expand` | — | Dense↔readable translation (needs the optional model) |
 | `graph_query` | — | graphify explain/path/query/build per repo |
+
+### Where the local model actually helps
+
+The original idea was to translate the agent's prose to and from "caveman" to
+save tokens. That turned out to be the weaker half: MCP tools return data
+*into* the agent's context, so compressing text after a tool already returned
+it saves nothing, and the agent can write densely by itself for free.
+
+`digest` is the shape that pays. Bulk text is read and reduced **here**, so
+only the digest crosses into the agent's context — measured at 91% smaller on
+a 58 KB source file (14,515 → 1,292 tokens), with the file itself never
+entering context. Reach for it before reading a long log, spec, or dump.
 
 ## Non-Windows machines
 

@@ -3,9 +3,9 @@
  * Amalgam MCP server — zero dependencies, plain Node.
  *
  * Bridges Claude Code to fully-local offload services:
- *   - PostgreSQL (portable) : L0..L3 layered memory (tencentdb concept)
- *   - llama.cpp + Qwen3-4B  : caveman compress/expand (caveman concept)
- *   - graphify via uv       : code knowledge graph queries (graphify concept)
+ *   - SQLite (node built-in) : L0..L3 layered memory (tencentdb concept)
+ *   - llama.cpp + Qwen3-4B   : bulk digest / caveman translation (optional)
+ *   - graphify via uv        : code knowledge graph queries (graphify concept)
  *
  * MCP stdio transport = newline-delimited JSON-RPC 2.0. Implemented by hand
  * so nothing needs to be installed.
@@ -16,55 +16,16 @@ import path from "node:path";
 import fs from "node:fs";
 
 import os from "node:os";
-import { ensurePg, ensureLlama, pgBin, LLAMA_URL as SVC_LLAMA_URL } from "../lib/services.mjs";
+import { ensureLlama, modelInstalled } from "../lib/services.mjs";
+import { open as openDb, ftsQuery, logUsage, DB_PATH } from "../lib/db.mjs";
 
 // Machine-level home: runtimes, model, and data live here (shared by all
 // projects on the machine). The package itself only carries code.
 const ROOT = process.env.AMALGAM_HOME ?? path.join(os.homedir(), ".amalgam");
-const PSQL = process.env.AMALGAM_PSQL ?? pgBin("psql");
-const PG_PORT = process.env.AMALGAM_PG_PORT ?? "5455";
-const PG_DB = process.env.AMALGAM_PG_DB ?? "amalgam";
 const LLAMA_URL = process.env.AMALGAM_LLAMA_URL ?? "http://127.0.0.1:8642";
 const SESSION_ID = process.env.AMALGAM_SESSION_ID ?? `s-${new Date().toISOString().slice(0, 10)}`;
 
-// ---------------------------------------------------------------- psql bridge
-/**
- * Run SQL, starting PostgreSQL on demand if it is not up. Sessions should
- * never fail just because the machine rebooted since the last one.
- */
-async function psql(sql, vars = {}) {
-  try {
-    return await psqlOnce(sql, vars);
-  } catch (e) {
-    if (!/connection to server|could not connect|Connection refused|spawn failed/i.test(e.message)) throw e;
-    if (!ensurePg()) {
-      throw new Error(
-        `PostgreSQL is not running and could not be started from ${ROOT}. Run 'amalgam install' if this machine has no runtime yet, else 'amalgam start'.`
-      );
-    }
-    return await psqlOnce(sql, vars);
-  }
-}
-
-function psqlOnce(sql, vars = {}) {
-  return new Promise((resolve, reject) => {
-    // SQL goes via stdin, not -c: psql only interpolates :'var' variables
-    // when reading from stdin/file, never inside -c command strings.
-    const args = ["-h", "127.0.0.1", "-p", PG_PORT, "-d", PG_DB, "-X", "-q", "-tA", "-F", "\t", "--no-psqlrc", "-v", "ON_ERROR_STOP=1"];
-    for (const [k, v] of Object.entries(vars)) args.push("-v", `${k}=${String(v)}`);
-    const p = spawn(PSQL, args, { windowsHide: true });
-    p.stdin.write(sql);
-    p.stdin.end();
-    let out = "", err = "";
-    p.stdout.on("data", (d) => (out += d));
-    p.stderr.on("data", (d) => (err += d));
-    p.on("error", (e) => reject(new Error(`psql spawn failed: ${e.message}. Is PostgreSQL extracted at runtime/pgsql?`)));
-    p.on("close", (code) => {
-      if (code !== 0) reject(new Error(`psql exited ${code}: ${err.trim() || out.trim()}`));
-      else resolve(out.replace(/\r/g, "").split("\n").filter((l) => l.length > 0).map((l) => l.split("\t")));
-    });
-  });
-}
+const db = () => openDb();
 
 // ------------------------------------------------------------- llama bridge
 async function llama(system, user, maxTokens = 2048) {
@@ -72,7 +33,9 @@ async function llama(system, user, maxTokens = 2048) {
   // rather than at session start. First call after a reboot pays the load.
   if (!(await ensureLlama())) {
     throw new Error(
-      `Local model could not be started (expected llama-server + model under ${ROOT}). Run 'amalgam install' if this machine has no runtime yet.`
+      modelInstalled()
+        ? `Local model is installed but llama-server would not start (check ${ROOT}\\runtime\\llama).`
+        : `The optional local model is not installed on this machine, so this tool is unavailable. Install it with 'amalgam install --with-model' (~2.5 GB), or do this reduction yourself instead.`
     );
   }
   let res;
@@ -220,6 +183,19 @@ const TOOLS = [
     inputSchema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
   },
   {
+    name: "digest",
+    description:
+      "Read a large file or run a command and return only a dense factual digest — the raw text never enters your context. Use for long logs, specs, dumps, or verbose command output you would otherwise read in full. Requires the optional local model.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file: { type: "string", description: "Path to a file to digest" },
+        command: { type: "string", description: "Shell command whose output should be digested (alternative to file)" },
+        focus: { type: "string", description: "Optional: what to pay attention to, e.g. 'errors and their causes'" },
+      },
+    },
+  },
+  {
     name: "graph_query",
     description:
       "Query a repo's local code knowledge graph (graphify, tree-sitter, no LLM) instead of grepping/reading files. mode 'explain' = one symbol's connections; 'path' = how two symbols connect; 'query' = scoped subgraph for a plain question; 'build' = (re)build the graph for a repo (slow on big repos — run once). Requires graph built in the repo (graphify-out/).",
@@ -243,99 +219,148 @@ async function handleTool(name, args) {
   switch (name) {
     case "memory_recall": {
       const limit = Math.min(Math.max(args.limit ?? 8, 1), 50);
-      const rows = await psql(
-        `SELECT * FROM (
-           SELECT 'L1'::text AS src, id::text AS ref, kind, context AS extra, content,
-                  ts_rank(ts, websearch_to_tsquery('english', :'q')) AS rank
-             FROM memory.l1_facts
-            WHERE ts @@ websearch_to_tsquery('english', :'q')
-           UNION ALL
-           SELECT 'L2', path, 'scenario', summary, left(content, 1200),
-                  ts_rank(ts, websearch_to_tsquery('english', :'q'))
-             FROM memory.l2_scenarios
-            WHERE ts @@ websearch_to_tsquery('english', :'q')
-           ${args.include_raw ? `UNION ALL
-           SELECT 'L0', id::text, role, session_id, content,
-                  ts_rank(ts, websearch_to_tsquery('english', :'q'))
-             FROM memory.l0_log
-            WHERE ts @@ websearch_to_tsquery('english', :'q')` : ""}
-         ) u ORDER BY rank DESC LIMIT ${limit};`,
-        { q: esc(args.query) }
-      );
+      const q = ftsQuery(args.query);
+      if (!q) return "No searchable terms in query.";
+      const d = db();
+      const rows = [];
+      for (const r of d.prepare(
+        `SELECT f.id, f.kind, f.context, f.content, bm25(l1_fts) AS rank
+           FROM l1_fts JOIN l1_facts f ON f.id = l1_fts.rowid
+          WHERE l1_fts MATCH ? ORDER BY rank LIMIT ?`).all(q, limit)) {
+        rows.push({ rank: r.rank, line: `[L1:${r.id}] (${r.kind}${r.context ? ` @${r.context}` : ""}) ${r.content}` });
+      }
+      for (const r of d.prepare(
+        `SELECT path, summary, substr(content, 1, 1200) AS content, bm25(l2_fts) AS rank
+           FROM l2_fts WHERE l2_fts MATCH ? ORDER BY rank LIMIT ?`).all(q, limit)) {
+        rows.push({ rank: r.rank, line: `[L2:${r.path}] (scenario${r.summary ? ` @${r.summary}` : ""}) ${r.content}` });
+      }
+      if (args.include_raw) {
+        for (const r of d.prepare(
+          `SELECT g.id, g.role, g.session_id, g.content, bm25(l0_fts) AS rank
+             FROM l0_fts JOIN l0_log g ON g.id = l0_fts.rowid
+            WHERE l0_fts MATCH ? ORDER BY rank LIMIT ?`).all(q, limit)) {
+          rows.push({ rank: r.rank, line: `[L0:${r.id}] (${r.role} @${r.session_id}) ${r.content}` });
+        }
+      }
       if (rows.length === 0) return "No memories matched.";
-      return rows
-        .map(([src, ref, kind, extra, content]) => `[${src}:${ref}] (${kind}${extra ? ` @${extra}` : ""}) ${content}`)
-        .join("\n");
+      // bm25() returns more-negative for better matches
+      const out = rows.sort((a, b) => a.rank - b.rank).slice(0, limit).map((r) => r.line).join("\n");
+      logUsage("memory_recall", String(args.query).length, out.length);
+      return out;
     }
     case "memory_save_fact": {
-      const rows = await psql(
-        `INSERT INTO memory.l1_facts (kind, content, context, priority)
-         VALUES (:'kind', :'content', :'context', :'priority'::int)
-         RETURNING id;`,
-        {
-          kind: args.kind ?? "fact",
-          content: args.content,
-          context: args.context ?? "",
-          priority: String(args.priority ?? 50),
-        }
-      );
-      return `Saved L1 fact id=${rows[0][0]}`;
+      const info = db().prepare(
+        `INSERT INTO l1_facts (kind, content, context, priority) VALUES (?, ?, ?, ?)`
+      ).run(args.kind ?? "fact", args.content, args.context ?? "", args.priority ?? 50);
+      return `Saved L1 fact id=${info.lastInsertRowid}`;
     }
     case "memory_log": {
-      let n = 0;
-      for (const m of args.messages) {
-        await psql(
-          `INSERT INTO memory.l0_log (session_id, role, content) VALUES (:'sid', :'role', :'content');`,
-          { sid: args.session_id ?? SESSION_ID, role: m.role, content: m.content }
-        );
-        n++;
-      }
-      return `Logged ${n} message(s) to L0 (session ${args.session_id ?? SESSION_ID}).`;
+      const stmt = db().prepare(`INSERT INTO l0_log (session_id, role, content) VALUES (?, ?, ?)`);
+      for (const m of args.messages) stmt.run(args.session_id ?? SESSION_ID, m.role, m.content);
+      return `Logged ${args.messages.length} message(s) to L0 (session ${args.session_id ?? SESSION_ID}).`;
     }
     case "memory_context_write": {
-      await psql(
-        `INSERT INTO memory.l2_scenarios (path, content, summary)
-         VALUES (:'path', :'content', :'summary')
-         ON CONFLICT (path) DO UPDATE
-           SET content = EXCLUDED.content, summary = EXCLUDED.summary,
-               version = memory.l2_scenarios.version + 1, updated_at = now();`,
-        { path: args.path, content: args.content, summary: args.summary ?? "" }
-      );
+      const d = db();
+      d.prepare(
+        `INSERT INTO l2_scenarios (path, content, summary) VALUES (?, ?, ?)
+         ON CONFLICT(path) DO UPDATE SET content = excluded.content, summary = excluded.summary,
+           version = version + 1, updated_at = datetime('now')`
+      ).run(args.path, args.content, args.summary ?? "");
+      // l2_fts is a standalone FTS table (path is the key, not a rowid), so
+      // keep it in step explicitly rather than with triggers.
+      d.prepare(`DELETE FROM l2_fts WHERE path = ?`).run(args.path);
+      d.prepare(`INSERT INTO l2_fts (path, summary, content) VALUES (?, ?, ?)`)
+        .run(args.path, args.summary ?? "", args.content);
       return `Wrote L2 scenario '${args.path}'.`;
     }
     case "memory_context_read": {
-      const rows = await psql(`SELECT content FROM memory.l2_scenarios WHERE path = :'path';`, { path: args.path });
-      return rows.length ? rows[0][0] : `No scenario at '${args.path}'.`;
+      const r = db().prepare(`SELECT content FROM l2_scenarios WHERE path = ?`).get(args.path);
+      return r ? r.content : `No scenario at '${args.path}'.`;
     }
     case "memory_context_list": {
-      const rows = await psql(
-        `SELECT path, summary, to_char(updated_at, 'YYYY-MM-DD') FROM memory.l2_scenarios
-          WHERE path LIKE :'prefix' || '%' ORDER BY path;`,
-        { prefix: args.prefix ?? "" }
-      );
-      return rows.length ? rows.map((r) => r.join(" | ")).join("\n") : "No scenarios stored.";
+      const rows = db().prepare(
+        `SELECT path, summary, substr(updated_at, 1, 10) AS updated FROM l2_scenarios
+          WHERE path LIKE ? ORDER BY path`).all((args.prefix ?? "") + "%");
+      return rows.length ? rows.map((r) => `${r.path} | ${r.summary} | ${r.updated}`).join("\n") : "No scenarios stored.";
     }
     case "memory_persona_read": {
-      const rows = await psql(`SELECT content FROM memory.l3_persona ORDER BY id DESC LIMIT 1;`);
-      return rows.length ? rows[0][0] : "No persona stored yet.";
+      const r = db().prepare(`SELECT content FROM l3_persona ORDER BY id DESC LIMIT 1`).get();
+      return r ? r.content : "No persona stored yet.";
     }
     case "memory_persona_write": {
-      await psql(`INSERT INTO memory.l3_persona (content) VALUES (:'content');`, { content: args.content });
+      db().prepare(`INSERT INTO l3_persona (content) VALUES (?)`).run(args.content);
       return "Persona updated (new L3 version).";
     }
-    case "caveman_compress":
-      return await llama(COMPRESS_SYS, args.text, Math.max(256, Math.ceil(args.text.length / 2)));
+    case "caveman_compress": {
+      const out = await llama(COMPRESS_SYS, args.text, Math.max(256, Math.ceil(args.text.length / 2)));
+      logUsage("caveman_compress", args.text.length, out.length);
+      return out;
+    }
     case "caveman_expand":
       return await llama(EXPAND_SYS, args.text, Math.max(512, args.text.length * 2));
+    case "digest": {
+      // The one shape where a local model genuinely saves frontier context:
+      // bulk text is read and reduced HERE, so only the digest is returned and
+      // the raw content never enters the caller's context.
+      let text, source;
+      if (args.file) {
+        source = args.file;
+        if (!fs.existsSync(args.file)) throw new Error(`File not found: ${args.file}`);
+        text = fs.readFileSync(args.file, "utf8");
+      } else if (args.command) {
+        source = `$ ${args.command}`;
+        const r = spawn(process.env.ComSpec || "cmd.exe", ["/c", args.command], { windowsHide: true });
+        text = await new Promise((resolve, reject) => {
+          let o = "";
+          r.stdout.on("data", (d) => (o += d));
+          r.stderr.on("data", (d) => (o += d));
+          r.on("error", reject);
+          r.on("close", () => resolve(o));
+        });
+      } else {
+        throw new Error("digest needs either `file` or `command`");
+      }
+      // Input larger than the model's context is the normal case here — that
+      // is the reason to digest at all — so map/reduce it: digest each chunk,
+      // then digest the combined digests until the result fits in one pass.
+      // Chunk sized to leave room for the answer inside an 8k-token context.
+      const CHUNK = 18000;
+      const focus = args.focus ? `\nFocus on: ${args.focus}` : "";
+      const SYS = `You reduce bulk text to a dense factual digest. Keep every concrete fact, name, number, path, command, and error verbatim. Drop narration and repetition. Output only the digest as terse lines.${focus}`;
+
+      const digestOnce = async (s) => llama(SYS, s, 1200);
+      const chunk = (s) => {
+        const parts = [];
+        for (let i = 0; i < s.length; i += CHUNK) parts.push(s.slice(i, i + CHUNK));
+        return parts;
+      };
+
+      let level = text;
+      let passes = 0;
+      while (level.length > CHUNK && passes < 3) {
+        const parts = chunk(level);
+        const digested = [];
+        for (const p of parts) digested.push(await digestOnce(p));
+        level = digested.join("\n");
+        passes++;
+      }
+      const out = level.length === text.length ? await digestOnce(level) : (level.length > CHUNK ? level : await digestOnce(level));
+
+      logUsage("digest", text.length, out.length);
+      const pct = text.length ? Math.round((1 - out.length / text.length) * 100) : 0;
+      return `Digest of ${source} (${text.length} chars -> ${out.length}, ${pct}% smaller${passes ? `, ${passes} reduction pass(es)` : ""}):\n\n${out}`;
+    }
     case "graph_query": {
       const repo = args.repo;
       if (!fs.existsSync(repo)) throw new Error(`Repo not found: ${repo}`);
       // --code-only: local tree-sitter AST only; the doc/image semantic pass
       // would call a cloud LLM backend, which this stack forbids.
       if (args.mode === "build") return await graphify(repo, [args.a ?? ".", "--code-only"]);
-      if (args.mode === "explain") return await graphify(repo, ["explain", args.a]);
-      if (args.mode === "path") return await graphify(repo, ["path", args.a, args.b]);
-      return await graphify(repo, ["query", args.a]);
+      const out = args.mode === "explain" ? await graphify(repo, ["explain", args.a])
+        : args.mode === "path" ? await graphify(repo, ["path", args.a, args.b])
+          : await graphify(repo, ["query", args.a]);
+      logUsage("graph_query", String(args.a ?? "").length, out.length);
+      return out;
     }
     default:
       throw new Error(`Unknown tool: ${name}`);

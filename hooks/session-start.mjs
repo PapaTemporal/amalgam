@@ -16,17 +16,17 @@
 import fs from "node:fs";
 import path from "node:path";
 
-let ensurePg, pgRunning, HOME;
+let HOME, modelInstalled;
 try {
-  ({ ensurePg, pgRunning, HOME } = await import("../lib/services.mjs"));
+  ({ HOME, modelInstalled } = await import("../lib/services.mjs"));
 } catch {
   process.exit(0); // runtime not installed here — stay quiet
 }
 
 try {
   if (!fs.existsSync(path.join(HOME, "mcp", "server.mjs"))) process.exit(0);
-
-  const pgUp = ensurePg();
+  // Nothing to start: memory is a SQLite file opened on demand, and the
+  // optional model starts itself only when a tool actually needs it.
 
   // Cheap reclaim check: registry only, no disk scanning.
   let reclaimHint = "";
@@ -46,8 +46,8 @@ try {
     "- This applies to all workflows in this session, BMAD skills included.",
     "- If the user opens without a specific task (\"what should I work on\", \"where did we leave off\"), run the `start` skill: it loads state and offers concrete choices instead of a blank prompt.",
   ];
-  if (!pgUp) {
-    lines.push("- NOTE: PostgreSQL is not running and could not be auto-started; memory tools will fail until `amalgam start` succeeds.");
+  if (modelInstalled()) {
+    lines.push("- Before reading a long file or verbose command output in full, use `digest` — the local model reduces it and only the digest enters your context.");
   }
   process.stdout.write(lines.join("\n") + reclaimHint + "\n");
 } catch {
