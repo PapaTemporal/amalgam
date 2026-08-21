@@ -50,6 +50,8 @@ const DOWNLOADS = [
   {
     id: "Qwen3-4B-Instruct GGUF model",
     url: `https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/${MODEL_FILE}`,
+    // Tried in order when the primary fails (e.g. proxies that block huggingface.co).
+    mirrors: [`https://hf-mirror.com/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/${MODEL_FILE}`],
     archive: path.join(HOME, "models", MODEL_FILE), // no extraction
     check: path.join(HOME, "models", MODEL_FILE),
     winOnly: false,
@@ -69,6 +71,7 @@ function manualHelp(items) {
   for (const d of items) {
     lines.push(`  ${d.id}  (${d.approx})`);
     lines.push(`    URL : ${d.url}`);
+    for (const m of d.mirrors ?? []) lines.push(`    Mirror: ${m}`);
     lines.push(`    Save to: ${d.archive}`);
     lines.push("");
   }
@@ -79,16 +82,18 @@ function manualHelp(items) {
 
 function download(d) {
   fs.mkdirSync(path.dirname(d.archive), { recursive: true });
-  console.log(`  downloading ${d.id} ${d.approx} ...`);
   const tmp = d.archive + ".part";
-  const r = spawnSync("curl", ["-L", "--fail", "--retry", "2", "-o", tmp, d.url], {
-    stdio: ["ignore", "inherit", "inherit"],
-  });
-  if (r.status === 0) {
-    fs.renameSync(tmp, d.archive);
-    return true;
+  for (const url of [d.url, ...(d.mirrors ?? [])]) {
+    console.log(`  downloading ${d.id} ${d.approx} from ${new URL(url).host} ...`);
+    const r = spawnSync("curl", ["-L", "--fail", "--retry", "2", "-o", tmp, url], {
+      stdio: ["ignore", "inherit", "inherit"],
+    });
+    if (r.status === 0) {
+      fs.renameSync(tmp, d.archive);
+      return true;
+    }
+    try { fs.rmSync(tmp, { force: true }); } catch {}
   }
-  try { fs.rmSync(tmp, { force: true }); } catch {}
   return false;
 }
 

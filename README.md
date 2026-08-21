@@ -50,8 +50,15 @@ list — fetch each file by hand, place it at the destination, re-run `install`:
 | PostgreSQL 17.5 portable (~300 MB) | <https://get.enterprisedb.com/postgresql/postgresql-17.5-1-windows-x64-binaries.zip> | `~/.amalgam/downloads/postgresql-17.5-1-windows-x64-binaries.zip` |
 | Qwen3-4B-Instruct Q4_K_M (~2.4 GB) | <https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf> | `~/.amalgam/models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf` |
 
+**huggingface.co blocked?** The installer automatically falls back to the
+mirror <https://hf-mirror.com> (same URL path, different domain). It also
+works manually: swap `huggingface.co` for `hf-mirror.com` in the model URL
+above.
+
 Already have the files on another machine? Copy them over and pass
-`--cache <dir>`, or drop them straight into the destinations above.
+`--cache <dir>`, or drop them straight into the destinations above — the
+most proxy-proof option of all. (This machine keeps copies in
+`~/.amalgam/downloads/` and `~/.amalgam/models/` for exactly that.)
 
 ## Wire a project (per project)
 
