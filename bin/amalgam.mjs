@@ -613,9 +613,13 @@ function graphStaleness(repo) {
   return { builtAt, commits: out ? out.split("\n").filter(Boolean).length : 0 };
 }
 
-function buildOneGraph(dir) {
+function buildOneGraph(dir, { sql = false } = {}) {
   console.log(`\n=== ${path.basename(dir)} — building code graph (tree-sitter, local, no LLM)`);
-  const r = spawnSync("uv", ["tool", "run", "--from", "graphifyy", "graphify", ".", "--code-only"], {
+  // graphify's own hint says `pip install graphifyy[sql]`, which does not apply
+  // here: it runs through uv in an ephemeral environment, so the extra belongs
+  // in the --from spec instead.
+  const from = sql ? "graphifyy[sql]" : "graphifyy";
+  const r = spawnSync("uv", ["tool", "run", "--from", from, "graphify", ".", "--code-only"], {
     cwd: dir, stdio: ["ignore", "inherit", "inherit"],
   });
   if (r.status !== 0) {
@@ -644,6 +648,7 @@ function cmdGraph(args) {
   const explicit = dirIdx >= 0 ? args[dirIdx + 1] : args.find((a) => !a.startsWith("--"));
   const check = args.includes("--check");
   const includeNonGit = args.includes("--all");
+  const sql = args.includes("--sql");
   const cwd = path.resolve(process.cwd());
 
   // An explicit path is taken literally — no workspace expansion.
@@ -654,7 +659,7 @@ function cmdGraph(args) {
       process.exit(1);
     }
     if (check) return reportStaleness(target, path.basename(target));
-    if (!buildOneGraph(target)) process.exit(1);
+    if (!buildOneGraph(target, { sql })) process.exit(1);
     return;
   }
 
@@ -664,7 +669,7 @@ function cmdGraph(args) {
 
   if (!isWorkspace) {
     if (check) return reportStaleness(cwd, path.basename(cwd));
-    if (!buildOneGraph(cwd)) process.exit(1);
+    if (!buildOneGraph(cwd, { sql })) process.exit(1);
     return;
   }
 
@@ -684,7 +689,7 @@ function cmdGraph(args) {
   console.log(`workspace ${cwd} — graphing ${targets.length} service(s)`);
   if (skipped.length) console.log(`skipping (not git repos): ${skipped.map((s) => s.name).join(", ")}   include with --all`);
   let failures = 0;
-  for (const s of targets) if (!buildOneGraph(s.path)) failures++;
+  for (const s of targets) if (!buildOneGraph(s.path, { sql })) failures++;
   console.log(`\n${targets.length - failures}/${targets.length} graph(s) built. Query them with the graph_query MCP tool.`);
   if (failures) process.exit(1);
 }
@@ -1308,7 +1313,8 @@ Usage:
                  [--directory <p>]  a workspace, or just the current repo.
                                     --directory/<path> targets one exactly,
                                     --check reports staleness only,
-                                    --all includes non-git directories
+                                    --all includes non-git directories,
+                                    --sql also parses .sql files
 
 Env overrides: AMALGAM_HOME, AMALGAM_DB, AMALGAM_LLAMA_PORT`);
 }
