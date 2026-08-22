@@ -371,6 +371,8 @@ does. `--builds-only` reclaims space without removing worktrees;
 | `memory_recall` | L1+L2 (+L0) | Ranked full-text search; primary context loader |
 | `memory_save_fact` | L1 | One distilled fact/preference/decision per call; checks the fact's paths and reports likely duplicates |
 | `memory_supersede` | L1 | Mark older facts replaced by a newer one — history kept, recall cleaned |
+| `task_start` / `task_note` | — | Open a work item; record decisions, blockers, test results, commits against it |
+| `task_resume` / `task_done` | — | Pick work back up in one read, or close it without losing its history |
 | `memory_log` | L0 | Verbatim conversation audit trail |
 | `memory_context_write/read/list` | L2 | Durable per-project scenario docs |
 | `memory_persona_read/write` | L3 | Stable user profile |
@@ -379,6 +381,56 @@ does. `--builds-only` reclaims space without removing worktrees;
 | `graph_query` | — | graphify explain/path/query/build per repo |
 | `code_context` | — | Evidence packet for a task: the symbols that matter, their callers, and their current source — instead of whole files |
 | `graph_impact` | — | Blast radius of a diff: which symbols changed and everything that calls them |
+
+### Keeping a memory honest
+
+A store that answers quickly and confidently with last month's truth is worse
+than one that answers nothing, because the mistake is paid for twice: once when
+it is read, again when it is corrected. Two mechanisms guard against it, and
+neither asks a model whether a memory is true.
+
+**Supersession.** When a fact replaces an older one, say so — `memory_supersede`
+records the edge, the old row leaves recall, and `include_superseded` brings the
+history back when it is the history you want. `memory_save_fact` compares each
+new fact against the stored vectors and reports anything close enough to be the
+thing it replaces, which costs a dot product per row and no model call.
+
+**Verification.** Prose needs a judge, but the anchors inside a fact — paths,
+above all — are checkable for free. Facts are checked as they are written and
+re-checked by `amalgam memory verify`; a fact whose paths have vanished is
+shown in recall with `!stale` beside it rather than hidden, because it is
+sometimes still the only answer. `unknown` stays distinct from `ok`, so a fact
+that could not be checked is never presented as one that passed.
+
+```bash
+amalgam memory verify     # re-check every live fact against this machine
+amalgam memory stale      # just the ones whose paths have gone
+amalgam memory history    # what replaced what
+```
+
+### Work items: resuming without re-deriving
+
+Each part of this stack knows one thing and none of them know each other. BMAD
+holds the story, git holds the branch, a work stream holds the worktree, memory
+holds the facts, the test run holds the verdict. Resuming yesterday's work
+means rediscovering all five — a research task at frontier-model prices, every
+time.
+
+A task is a thin thread through them. It does not plan or replace a story; it
+records which story, which branch, which stream, and what happened, so "where
+was I" is a lookup. Events are append-only, because the useful question is
+almost always *what did I already try*.
+
+```bash
+amalgam task new "Rework session token validation" --story API-42
+amalgam task note 1 "reject empty tokens at the edge, not per handler" --kind decision
+amalgam task note 1 "unit 41/41, integration needs a fixture user" --kind test
+amalgam task show 1        # coordinates, history, and what was learned
+```
+
+The agent has the same store through `task_start` / `task_note` / `task_resume`,
+and `amalgam brief` lists what is open — so the thread survives whichever end of
+it you pick up. Facts saved with a `task_id` come back with the task.
 
 ### Evidence instead of files
 

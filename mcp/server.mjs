@@ -23,6 +23,7 @@ import { ensureLlama, modelInstalled } from "../lib/services.mjs";
 import { open as openDb, ftsQuery, logUsage, DB_PATH } from "../lib/db.mjs";
 import { embed, similarity, toBlob, fromBlob, embeddingsInstalled } from "../lib/embed.mjs";
 import { verifyFact } from "../lib/verify.mjs";
+import { createTask, addEvent, setState, listTasks, resume, renderResume } from "../lib/tasks.mjs";
 import { loadGraph, hasGraph, findSymbols, sliceSymbol, callersOf, calleesOf,
          changedFiles, changedRanges, symbolsInRanges } from "../lib/graph.mjs";
 
@@ -226,6 +227,7 @@ const TOOLS = [
         content: { type: "string", description: "Caveman-dense fact text" },
         context: { type: "string", default: "", description: "Project/topic tag, e.g. 'api-server'" },
         priority: { type: "integer", default: 50, minimum: 0, maximum: 100 },
+        task_id: { type: "integer", description: "Work item this was learned during (see task_start); lets a resumed task recover it" },
       },
       required: ["content"],
     },
@@ -323,6 +325,56 @@ const TOOLS = [
         b: { type: "string", description: "path mode only: to-symbol" },
       },
       required: ["repo", "mode"],
+    },
+  },
+  {
+    name: "task_start",
+    description:
+      "Open a work item that ties a piece of work to its repo, branch, work stream and story. Cheap and worth doing for anything spanning more than one exchange: notes and facts recorded against it make 'where was I' a lookup instead of an investigation next session. Returns the task id.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        repo: { type: "string" }, branch: { type: "string" },
+        stream: { type: "string" }, story: { type: "string", description: "Story/issue id this implements, if any" },
+      },
+      required: ["title"],
+    },
+  },
+  {
+    name: "task_note",
+    description:
+      "Record one thing that happened on a work item: a decision and why, a blocker, a test result, a commit. Append-only. What was already tried is usually the expensive thing to rediscover.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        task_id: { type: "integer" },
+        kind: { type: "string", enum: ["note", "decision", "blocker", "test", "commit", "state"], default: "note" },
+        detail: { type: "string" },
+      },
+      required: ["task_id", "detail"],
+    },
+  },
+  {
+    name: "task_resume",
+    description:
+      "Pick work back up: with an id, the item's full history — where it lives, what was decided, what broke, and the facts learned during it. Without one, the open items, most recently touched first. Call this before asking the user what they were doing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        task_id: { type: "integer" },
+        repo: { type: "string", description: "Filter the list to one repo" },
+        state: { type: "string", enum: ["open", "done", "all"], default: "open" },
+      },
+    },
+  },
+  {
+    name: "task_done",
+    description: "Close a work item. Its history stays readable; it stops appearing in the open list.",
+    inputSchema: {
+      type: "object",
+      properties: { task_id: { type: "integer" }, outcome: { type: "string" } },
+      required: ["task_id"],
     },
   },
   {
@@ -459,9 +511,10 @@ async function handleTool(name, args) {
       // now costs nothing; discovering it mid-task months later is expensive.
       const v = verifyFact(args.content);
       const info = d.prepare(
-        `INSERT INTO l1_facts (kind, content, context, priority, verify_state, verify_note, verified_at)
-         VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`
-      ).run(args.kind ?? "fact", args.content, args.context ?? "", args.priority ?? 50, v.state, v.note);
+        `INSERT INTO l1_facts (kind, content, context, priority, verify_state, verify_note, verified_at, task_id)
+         VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?)`
+      ).run(args.kind ?? "fact", args.content, args.context ?? "", args.priority ?? 50, v.state, v.note,
+            args.task_id ? Number(args.task_id) : null);
       const id = Number(info.lastInsertRowid);
       const vec = await embedRow("l1", id, `${args.content} ${args.context ?? ""}`);
 
@@ -595,6 +648,38 @@ async function handleTool(name, args) {
       logUsage("graph_query", String(args.a ?? "").length, out.length);
       return out;
     }
+    case "task_start": {
+      const id = createTask({
+        title: args.title, repo: args.repo ?? "", branch: args.branch ?? "",
+        stream: args.stream ?? "", story: args.story ?? "",
+      });
+      return `Opened task ${id}: ${args.title}
+Record what happens with task_note, and save durable facts with memory_save_fact { task_id: ${id} }.`;
+    }
+    case "task_note": {
+      addEvent(args.task_id, args.kind ?? "note", args.detail);
+      return `Noted on task ${args.task_id}.`;
+    }
+    case "task_done": {
+      if (args.outcome) addEvent(args.task_id, "state", args.outcome);
+      setState(args.task_id, "done");
+      return `Task ${args.task_id} closed. Its history stays readable via task_resume.`;
+    }
+    case "task_resume": {
+      if (args.task_id) {
+        const out = renderResume(resume(args.task_id));
+        logUsage("task_resume", 0, out.length);
+        return out;
+      }
+      const rows = listTasks({ repo: args.repo ?? "", state: args.state ?? "open" });
+      if (!rows.length) return "No open work items.";
+      const out = rows.map((t) =>
+        `task ${t.id} [${t.state}] ${t.title}` +
+        `${t.repo ? ` — ${t.repo}` : ""}${t.branch ? ` @${t.branch}` : ""}${t.story ? ` (story ${t.story})` : ""}` +
+        `  last touched ${t.updated_at}`).join("\n");
+      logUsage("task_resume", 0, out.length);
+      return out;
+    }
     case "code_context": {
       const repo = args.repo;
       if (!fs.existsSync(repo)) throw new Error(`Repo not found: ${repo}`);
@@ -617,7 +702,11 @@ async function handleTool(name, args) {
         }
       }
       const out = parts.join("\n");
-      logUsage("code_context", String(args.task).length, out.length);
+      // The counterfactual is knowable here, so measure it: without a packet
+      // the agent would have read the files these symbols live in.
+      const baseline = [...new Set(found.map((n) => n.file))]
+        .reduce((sum, f) => sum + (fs.existsSync(path.join(repo, f)) ? fs.statSync(path.join(repo, f)).size : 0), 0);
+      logUsage("code_context", String(args.task).length, out.length, baseline);
       return out;
     }
     case "graph_impact": {
@@ -653,7 +742,8 @@ async function handleTool(name, args) {
           : `    no callers in the graph — entry point, or reached dynamically`);
       }
       const out = parts.join("\n");
-      logUsage("graph_impact", rev.length, out.length);
+      const baseline = files.reduce((sum, f) => sum + (fs.existsSync(path.join(repo, f)) ? fs.statSync(path.join(repo, f)).size : 0), 0);
+      logUsage("graph_impact", rev.length, out.length, baseline);
       return out;
     }
     default:

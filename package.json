@@ -14,5 +14,8 @@
     "type": "git",
     "url": "git+https://github.com/papatemporal/amalgam.git"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "scripts": {
+    "test": "node tests/recall-eval.mjs && node tests/memory-eval.mjs && node tests/graph-eval.mjs && node tests/task-eval.mjs"
+  }
 }

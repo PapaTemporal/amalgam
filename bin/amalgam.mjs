@@ -24,6 +24,7 @@ import os from "node:os";
 import { ensureLlama, llamaHealthy, modelInstalled, LLAMA_PORT } from "../lib/services.mjs";
 import { open as openDb } from "../lib/db.mjs";
 import { verifyFact } from "../lib/verify.mjs";
+import { createTask, addEvent, setState, listTasks, resume, renderResume } from "../lib/tasks.mjs";
 
 const PKG = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HOME = process.env.AMALGAM_HOME ?? path.join(os.homedir(), ".amalgam");
@@ -385,7 +386,8 @@ async function cmdStatus() {
 function cmdStats() {
   const d = openDb();
   const rows = d.prepare(
-    `SELECT tool, count(*) AS calls, sum(in_chars) AS in_chars, sum(out_chars) AS out_chars
+    `SELECT tool, count(*) AS calls, sum(in_chars) AS in_chars, sum(out_chars) AS out_chars,
+            sum(coalesce(baseline_chars, 0)) AS baseline
        FROM usage_log GROUP BY tool ORDER BY calls DESC`).all();
   if (rows.length === 0) {
     console.log("No tool usage recorded yet.");
@@ -394,11 +396,25 @@ function cmdStats() {
   }
   const est = (chars) => Math.round(chars / 4); // ~4 chars/token, rough but consistent
   console.log("tool              calls    returned (est. tokens)   note");
+  let avoided = 0;
   for (const r of rows) {
-    const note = r.tool === "caveman_compress" || r.tool === "digest"
-      ? `input ${est(r.in_chars)} tok -> ${est(r.out_chars)} tok (${Math.round((1 - r.out_chars / Math.max(r.in_chars, 1)) * 100)}% smaller, measured)`
-      : "context loaded locally instead of by reading files";
+    // Three different epistemic states, kept apart on purpose. A digest knows
+    // what it consumed; a packet knows the files it stood in for; a recall
+    // knows neither, and claiming a saving there would be inventing one.
+    let note;
+    if (r.tool === "caveman_compress" || r.tool === "digest") {
+      note = `input ${est(r.in_chars)} tok -> ${est(r.out_chars)} tok (${Math.round((1 - r.out_chars / Math.max(r.in_chars, 1)) * 100)}% smaller, measured)`;
+      avoided += Math.max(r.in_chars - r.out_chars, 0);
+    } else if (r.baseline > 0) {
+      note = `replaced ${est(r.baseline)} tok of file reads (${Math.round((1 - r.out_chars / r.baseline) * 100)}% smaller, measured)`;
+      avoided += Math.max(r.baseline - r.out_chars, 0);
+    } else {
+      note = "context loaded locally instead of by reading files";
+    }
     console.log(`${r.tool.padEnd(18)}${String(r.calls).padEnd(9)}${String(est(r.out_chars)).padEnd(25)}${note}`);
+  }
+  if (avoided > 0) {
+    console.log(`\nnot sent to the frontier model: ~${est(avoided)} tokens, measured against what each call actually replaced.`);
   }
   const counts = d.prepare(
     `SELECT (SELECT count(*) FROM l1_facts) f, (SELECT count(*) FROM l2_scenarios) s, (SELECT count(*) FROM l0_log) l`).get();
@@ -940,6 +956,18 @@ function cmdBrief(args) {
     }
   }
 
+  // --- open work items ---
+  // Listed before BMAD's artifacts because this is the question a session
+  // actually opens with: not "what exists" but "what was I in the middle of".
+  try {
+    const open = listTasks({ repo, state: "open", limit: 5 });
+    if (open.length) {
+      L.push(`TASKS    ${open.length} open`);
+      for (const t of open) L.push(`         ${t.id}: ${t.title}${t.story ? ` (story ${t.story})` : ""}  — ${t.updated_at}`);
+      L.push(`         resume one with: amalgam task show <id>`);
+    }
+  } catch {}
+
   // --- BMAD ---
   const bmadDir = path.join(repo, "_bmad");
   if (fs.existsSync(bmadDir)) {
@@ -1311,6 +1339,76 @@ Stale means a path named in the fact is gone. Fix the fact, or save a corrected 
   console.log("usage: amalgam memory [verify|list|stale|history]");
 }
 
+// ================================================================== tasks
+/**
+ * Work items from the terminal. The agent has MCP tools for the same store,
+ * so a task opened in a session is visible here and the other way round —
+ * which is the point: the thread survives whichever end of it you pick up.
+ */
+function cmdTask(args) {
+  // Options and their values are pulled out first, so what remains is the
+  // prose the user typed. Filtering only tokens starting with "--" would leave
+  // each option's VALUE behind and glue it onto the title.
+  const parse = (argv) => {
+    const opts = {};
+    const words = [];
+    for (let i = 0; i < argv.length; i++) {
+      if (argv[i].startsWith("--")) { opts[argv[i].slice(2)] = argv[i + 1] ?? ""; i++; }
+      else words.push(argv[i]);
+    }
+    return { opts, text: words.join(" ") };
+  };
+
+  const [sub, ...rest] = args;
+  switch (sub) {
+    case "new": {
+      const { opts, text } = parse(rest);
+      if (!text) return console.log('usage: amalgam task new "<title>" [--repo <path>] [--branch <b>] [--story <id>] [--stream <s>]');
+      const repo = opts.repo || process.cwd();
+      const head = git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]);
+      const id = createTask({
+        title: text, repo,
+        branch: opts.branch || (head.ok ? head.out : ""),
+        stream: opts.stream ?? "", story: opts.story ?? "",
+      });
+      console.log(`task ${id} opened: ${text}`);
+      return;
+    }
+    case "note": {
+      const { opts, text } = parse(rest);
+      const [id, ...words] = text.split(" ");
+      if (!id || !words.length) return console.log('usage: amalgam task note <id> "<what happened>" [--kind decision|blocker|test|commit]');
+      addEvent(id, opts.kind ?? "note", words.join(" "));
+      console.log(`noted on task ${id}`);
+      return;
+    }
+    case "done": {
+      if (!rest[0]) return console.log("usage: amalgam task done <id>");
+      setState(rest[0], "done");
+      console.log(`task ${rest[0]} closed`);
+      return;
+    }
+    case "show": {
+      if (!rest[0]) return console.log("usage: amalgam task show <id>");
+      console.log(renderResume(resume(rest[0])));
+      return;
+    }
+    case undefined:
+    case "list": {
+      const rows = listTasks({ state: rest.includes("--all") ? "all" : "open" });
+      if (!rows.length) return console.log('no open work items — start one with: amalgam task new "<title>"');
+      for (const t of rows) {
+        console.log(`task ${t.id} [${t.state}] ${t.title}`);
+        const where = [t.repo && path.basename(t.repo), t.branch && `@${t.branch}`, t.story && `story ${t.story}`].filter(Boolean);
+        console.log(`      ${where.join(" ")}   last touched ${t.updated_at}`);
+      }
+      return;
+    }
+    default:
+      console.log("usage: amalgam task [list|new|note|show|done]");
+  }
+}
+
 // ---------------------------------------------------------------- dispatch
 const [cmd, ...rest] = process.argv.slice(2);
 switch (cmd) {
@@ -1320,6 +1418,7 @@ switch (cmd) {
   case "status": await cmdStatus(); break;
   case "stats": cmdStats(); break;
   case "memory": cmdMemory(rest); break;
+  case "task": cmdTask(rest); break;
   case "wire": cmdWire(rest); break;
   case "stream": cmdStream(rest); break;
   case "brief": cmdBrief(rest); break;
@@ -1357,6 +1456,9 @@ Usage:
   amalgam memory [sub]              verify | list | stale | history — re-check
                                     stored facts against this machine and show
                                     what drifted or was superseded
+  amalgam task [sub]                list | new | note | show | done — the work
+                                    item tying a story, branch, stream and what
+                                    was learned into one resumable thread
   amalgam wire [--claude|--copilot] wire the current project (default: both)
   amalgam wire --user               wire once for EVERY project on this machine
                                     (skills + hook + MCP at user scope)
