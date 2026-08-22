@@ -87,6 +87,10 @@ them and their expensive build directories alone.
   back to Grep/Read only when the graph lacks the answer — and prefer a
   file read outright for a file small enough that a packet would not
   save anything.
+- **Never read a build log.** Run tests, builds, linters and type checks
+  through `run_check`. It returns the exit code and the failing lines
+  byte-for-byte; the thousands of lines around them are never sent. Use
+  `digest` for bulk text that has no failure format to recognise.
 - **Compress bulky payloads.** Before storing long notes, or when you must
   carry a verbose document forward, run `caveman_compress` locally and keep
   only the dense version.

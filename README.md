@@ -433,6 +433,40 @@ the wasted read this is trying to avoid. On this repo that removes 4.4% of
 caller edges. It also means a stale graph degrades honestly instead of
 confidently pointing at code that has moved.
 
+### Never read a build log
+
+The most reliably wasteful exchange in agentic development: a command prints
+two thousand lines, nine of them matter, and all two thousand are pasted into
+the conversation so the model can find the nine — several times per task, at
+frontier prices.
+
+`run_check` runs the command and returns the exit code and the failures,
+**byte for byte**. Fidelity is the point rather than brevity: an error message
+with a paraphrased line number sends someone to the wrong place with
+confidence, so nothing here is ever summarised by a model. Compilers and test
+runners announce failures in formats a regular expression reads perfectly —
+tsc, cargo, pytest, go test, make, jest and friends — and output nobody
+recognises falls back to the tail verbatim rather than being guessed at.
+
+```bash
+amalgam check "npm test"
+```
+
+```text
+$ npm test --silent
+exit 0 · 188 lines of output · 34.1s · passed
+4/4 passed
+all checks passed …
+
+(7768 characters of output, 7584 of them not printed)
+```
+
+Two details worth knowing, both found by the tests rather than by design: the
+streams are captured separately, because merged into one buffer they interleave
+by arrival and a failure ends up hundreds of lines from its own explanation;
+and a timeout kills the whole process tree, since killing the shell leaves the
+test runner underneath it happily hanging.
+
 ### Recall spends a budget, not a count
 
 Asking for "eight memories" controls neither cost nor redundancy. Eight terse

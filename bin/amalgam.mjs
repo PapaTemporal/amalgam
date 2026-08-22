@@ -25,6 +25,7 @@ import { ensureLlama, llamaHealthy, modelInstalled, LLAMA_PORT,
          stopLlama, minutesIdle, IDLE_MINUTES } from "../lib/services.mjs";
 import { open as openDb } from "../lib/db.mjs";
 import { verifyFact } from "../lib/verify.mjs";
+import { check as runCheck, render as renderCheck } from "../lib/checks.mjs";
 // The reclamation rules live in lib/streams.mjs so they can be tested against
 // real repositories; this file only prints what they decide.
 import { git, readStreams, writeStreams, streamKey, inspectStream, classify,
@@ -1396,6 +1397,25 @@ function cmdTask(args) {
   }
 }
 
+// ================================================================== checks
+/**
+ * Run a build or test command and print only what failed.
+ *
+ * The same reduction the agent gets, available to a person — partly because it
+ * is genuinely useful at a prompt, and partly because a tool whose output you
+ * cannot reproduce by hand is a tool you cannot check.
+ */
+async function cmdCheck(args) {
+  const command = args.filter((a) => !a.startsWith("--")).join(" ");
+  if (!command) return console.log('usage: amalgam check "<command>"   e.g. amalgam check "npm test"');
+  const result = await runCheck(command, { cwd: process.cwd() });
+  console.log(renderCheck(result));
+  const saved = result.raw.length - renderCheck(result).length;
+  if (saved > 0) console.log(`
+(${result.raw.length} characters of output, ${saved} of them not printed)`);
+  process.exitCode = result.code === 0 ? 0 : 1;
+}
+
 // ---------------------------------------------------------------- dispatch
 const [cmd, ...rest] = process.argv.slice(2);
 switch (cmd) {
@@ -1406,6 +1426,7 @@ switch (cmd) {
   case "stats": cmdStats(); break;
   case "memory": cmdMemory(rest); break;
   case "task": cmdTask(rest); break;
+  case "check": await cmdCheck(rest); break;
   case "wire": cmdWire(rest); break;
   case "stream": cmdStream(rest); break;
   case "brief": cmdBrief(rest); break;
@@ -1439,6 +1460,8 @@ Usage:
   amalgam status                    health check
   amalgam version                   what is deployed vs. what this source has
   amalgam update                    pull, re-deploy, and refresh every wired copy
+  amalgam check "<command>"         run a build/test command and print only
+                                    what failed, with the exit code
   amalgam stats                     measured tool usage — is any of this earning its keep?
   amalgam memory [sub]              verify | list | stale | history — re-check
                                     stored facts against this machine and show

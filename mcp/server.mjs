@@ -21,6 +21,7 @@ import fs from "node:fs";
 import os from "node:os";
 import { ensureLlama, modelInstalled } from "../lib/services.mjs";
 import { llama, rerankSymbols } from "../lib/llm.mjs";
+import { check as runCheck, render as renderCheck } from "../lib/checks.mjs";
 import { open as openDb, ftsQuery, logUsage, DB_PATH } from "../lib/db.mjs";
 import { embed, similarity, toBlob, fromBlob, embeddingsInstalled } from "../lib/embed.mjs";
 import { verifyFact } from "../lib/verify.mjs";
@@ -386,6 +387,21 @@ const TOOLS = [
     },
   },
   {
+    name: "run_check",
+    description:
+      "Run a build, test suite, linter or type check and return ONLY what failed, verbatim, plus the exit code. The command's output never enters your context — a two thousand line test run comes back as the nine lines that matter. Use this instead of running the command yourself and reading its output.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        command: { type: "string", description: "Command line to run, e.g. 'npm test' or 'cargo build'" },
+        cwd: { type: "string", description: "Directory to run it in (default: current)" },
+        max_failures: { type: "integer", default: 25, minimum: 1, maximum: 200 },
+        timeout_ms: { type: "integer", default: 600000, minimum: 1000 },
+      },
+      required: ["command"],
+    },
+  },
+  {
     name: "code_context",
     description:
       "Assemble an evidence packet for a task from a repo's code graph: the symbols that matter, who calls them, what they call, and their CURRENT source lines read from disk. Use this INSTEAD of reading whole files when you need to understand or change existing code — it returns the few hundred tokens that bear on the task rather than the few thousand that surround them. Requires a built graph (amalgam graph).",
@@ -714,6 +730,18 @@ Record what happens with task_note, and save durable facts with memory_save_fact
         `${t.repo ? ` — ${t.repo}` : ""}${t.branch ? ` @${t.branch}` : ""}${t.story ? ` (story ${t.story})` : ""}` +
         `  last touched ${t.updated_at}`).join("\n");
       logUsage("task_resume", 0, out.length);
+      return out;
+    }
+    case "run_check": {
+      const result = await runCheck(args.command, {
+        cwd: args.cwd,
+        maxFailures: Math.min(Math.max(args.max_failures ?? 25, 1), 200),
+        timeoutMs: args.timeout_ms,
+      });
+      const out = renderCheck(result);
+      // The counterfactual is exact here: without this the whole output would
+      // have been read.
+      logUsage("run_check", args.command.length, out.length, result.raw.length);
       return out;
     }
     case "code_context": {
