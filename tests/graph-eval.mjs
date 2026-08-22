@@ -47,6 +47,27 @@ export function renderBanner() {
 }
 `;
 fs.writeFileSync(path.join(TMP, "session.js"), SRC);
+
+// A real caller, importing the symbol from where it is defined.
+fs.writeFileSync(path.join(TMP, "client.js"), `import { parseToken } from "./session.js";
+
+export function handleRequest(req) {
+  return parseToken(req.token);
+}
+`);
+
+// A file that never touches session.js, but where the same NAME is bound
+// locally — the case name-based extraction cannot see.
+fs.writeFileSync(path.join(TMP, "worker.js"), `export function run(input) {
+  return new Promise((parseToken) => parseToken(input));
+}
+
+export function label(v) {
+  const renderBanner = () => "worker";
+  return renderBanner() + v;
+}
+`);
+
 fs.mkdirSync(path.join(TMP, "graphify-out"), { recursive: true });
 
 git(TMP, ["init", "-q"]);
@@ -67,16 +88,25 @@ const GRAPH = {
     { id: "s_render", label: "renderBanner()", _callable: true, source_file: "session.js", source_location: "L99" },
     { id: "s_gone", label: "legacyLogin()", _callable: true, source_file: "session.js", source_location: "L40" },
     { id: "s_file", label: "session.js", source_file: "session.js", source_location: "L1" },
+    { id: "c_handle", label: "handleRequest()", _callable: true, source_file: "client.js", source_location: "L3" },
+    { id: "w_run", label: "run()", _callable: true, source_file: "worker.js", source_location: "L1" },
+    { id: "w_label", label: "label()", _callable: true, source_file: "worker.js", source_location: "L5" },
   ],
   links: [
-    { source: "s_validate", target: "s_parse", relation: "calls" },
-    { source: "s_file", target: "s_parse", relation: "calls" },
+    { source: "s_validate", target: "s_parse", relation: "calls", source_file: "session.js", source_location: "L6" },
+    { source: "s_file", target: "s_parse", relation: "calls", source_file: "session.js", source_location: "L1" },
+    // genuine: client.js imports parseToken from session.js and calls it
+    { source: "c_handle", target: "s_parse", relation: "calls", source_file: "client.js", source_location: "L4" },
+    // false: parseToken here is a Promise callback parameter
+    { source: "w_run", target: "s_parse", relation: "calls", source_file: "worker.js", source_location: "L2" },
+    // false: renderBanner here is a local const in another file
+    { source: "w_label", target: "s_render", relation: "calls", source_file: "worker.js", source_location: "L7" },
   ],
 };
 fs.writeFileSync(path.join(TMP, "graphify-out", "graph.json"), JSON.stringify(GRAPH));
 
 const g = loadGraph(TMP);
-check("graph loads", g && g.nodes.size === 5, `${g?.nodes.size} nodes`);
+check("graph loads", g && g.nodes.size === 8, `${g?.nodes.size} nodes`);
 
 // --- selection --------------------------------------------------------------
 const picked = findSymbols(g, "validate the session token", 2).map((n) => n.name);
@@ -85,6 +115,20 @@ check("task text selects the right symbols", picked.includes("validateSession"),
 check("callers come from the graph",
   callersOf(g, "s_parse").map((n) => n.name).includes("validateSession"),
   callersOf(g, "s_parse").map((n) => n.name).join(", "));
+
+// --- edges are checked against the source, not taken on faith ---------------
+// A call graph built by name cannot see scope: a Promise callback parameter
+// and a local const both look like calls to a same-named export elsewhere.
+const unchecked = callersOf(g, "s_parse").map((n) => n.name);
+const checked = callersOf(g, "s_parse", TMP);
+check("a real cross-file caller survives verification",
+  checked.map((n) => n.name).includes("handleRequest"), checked.map((n) => n.name).join(", "));
+check("a parameter of the same name is not a caller",
+  !checked.map((n) => n.name).includes("run") && unchecked.includes("run"),
+  `unverified: ${unchecked.join(", ")} -> verified: ${checked.map((n) => n.name).join(", ")}`);
+check("a local const of the same name is not a caller",
+  !callersOf(g, "s_render", TMP).map((n) => n.name).includes("label"),
+  `dropped ${callersOf(g, "s_render", TMP).rejected} unconfirmed edge(s)`);
 
 // --- the graph selects, the working tree supplies ---------------------------
 const validate = sliceSymbol(TMP, g.nodes.get("s_validate"), 4);

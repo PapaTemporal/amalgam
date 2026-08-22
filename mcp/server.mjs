@@ -147,9 +147,9 @@ const git = (repo, args) => {
 };
 
 /** One line naming a symbol and its immediate neighbourhood in the graph. */
-function symbolHeader(g, n, sym) {
-  const inb = callersOf(g, n.id).map((c) => c.name);
-  const out = calleesOf(g, n.id).map((c) => c.name);
+function symbolHeader(g, n, sym, repo = null, cache = new Map()) {
+  const inb = callersOf(g, n.id, repo, cache).map((c) => c.name);
+  const out = calleesOf(g, n.id, repo, cache).map((c) => c.name);
   const bits = [`${sym.file}:${sym.line ?? "?"}  ${n.label}`];
   if (inb.length) bits.push(`called by: ${inb.slice(0, 6).join(", ")}${inb.length > 6 ? ` (+${inb.length - 6})` : ""}`);
   if (out.length) bits.push(`calls: ${out.slice(0, 6).join(", ")}${out.length > 6 ? ` (+${out.length - 6})` : ""}`);
@@ -692,9 +692,10 @@ Record what happens with task_note, and save durable facts with memory_save_fact
       const parts = [];
       const drift = graphDrift(repo, g);
       if (drift) parts.push(`(${drift})`);
+      const siteCache = new Map();
       for (const n of found) {
         const sym = sliceSymbol(repo, n, lines);
-        parts.push(`--- ${symbolHeader(g, n, sym)}`);
+        parts.push(`--- ${symbolHeader(g, n, sym, repo, siteCache)}`);
         if (sym.missing) parts.push(`    [${sym.missing} — the graph is behind the tree here]`);
         else {
           if (sym.moved) parts.push(`    [moved since the graph was built; located by name]`);
@@ -734,8 +735,11 @@ Record what happens with task_note, and save durable facts with memory_save_fact
       const unknown = files.filter((f) => !known.has(f));
       if (unknown.length) parts.push(`not in the graph (new or unindexed): ${unknown.join(", ")}`);
 
+      const siteCache = new Map();
+      let dropped = 0;
       for (const n of touched) {
-        const inb = callersOf(g, n.id);
+        const inb = callersOf(g, n.id, repo, siteCache);
+        dropped += inb.rejected ?? 0;
         parts.push(`--- ${n.file}:${n.line} ${n.label}`);
         parts.push(inb.length
           ? `    called by: ${inb.map((c) => `${c.name} (${c.file}:${c.line})`).join(", ")}`
@@ -744,6 +748,7 @@ Record what happens with task_note, and save durable facts with memory_save_fact
       const out = parts.join("\n");
       const baseline = files.reduce((sum, f) => sum + (fs.existsSync(path.join(repo, f)) ? fs.statSync(path.join(repo, f)).size : 0), 0);
       logUsage("graph_impact", rev.length, out.length, baseline);
+      if (dropped) return `${out}\n(${dropped} edge(s) the source did not confirm were left out — shadowed names or calls that no longer exist)`;
       return out;
     }
     default:
