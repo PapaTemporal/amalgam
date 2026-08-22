@@ -87,6 +87,10 @@ them and their expensive build directories alone.
   back to Grep/Read only when the graph lacks the answer — and prefer a
   file read outright for a file small enough that a packet would not
   save anything.
+- **Gate before review.** Finished a change? `run_gate` runs the
+  project's own checks and returns one verdict. Never ask for a review of
+  something a type checker or a test suite has not seen yet — that spends
+  the expensive model on what the cheap tools decide for free.
 - **Never read a build log.** Run tests, builds, linters and type checks
   through `run_check`. It returns the exit code and the failing lines
   byte-for-byte; the thousands of lines around them are never sent. Use

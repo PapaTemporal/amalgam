@@ -22,6 +22,7 @@ import os from "node:os";
 import { ensureLlama, modelInstalled } from "../lib/services.mjs";
 import { llama, rerankSymbols } from "../lib/llm.mjs";
 import { check as runCheck, render as renderCheck } from "../lib/checks.mjs";
+import { runGate, renderGate, detectChecks } from "../lib/gates.mjs";
 import { open as openDb, ftsQuery, logUsage, DB_PATH } from "../lib/db.mjs";
 import { embed, similarity, toBlob, fromBlob, embeddingsInstalled } from "../lib/embed.mjs";
 import { verifyFact } from "../lib/verify.mjs";
@@ -402,6 +403,19 @@ const TOOLS = [
     },
   },
   {
+    name: "run_gate",
+    description:
+      "Run the project's own checks (type check, lint, tests — detected from package.json, Cargo.toml, go.mod, pytest or a Makefile) and return one verdict. Use this before asking for a review: what a type checker or a test suite can settle should never cost a review, and only the failures come back.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: { type: "string", description: "Project directory (default: current)" },
+        stop_on_first: { type: "boolean", default: true, description: "Stop at the first failing check" },
+        timeout_ms: { type: "integer", default: 600000, minimum: 1000 },
+      },
+    },
+  },
+  {
     name: "code_context",
     description:
       "Assemble an evidence packet for a task from a repo's code graph: the symbols that matter, who calls them, what they call, and their CURRENT source lines read from disk. Use this INSTEAD of reading whole files when you need to understand or change existing code — it returns the few hundred tokens that bear on the task rather than the few thousand that surround them. Requires a built graph (amalgam graph).",
@@ -742,6 +756,14 @@ Record what happens with task_note, and save durable facts with memory_save_fact
       // The counterfactual is exact here: without this the whole output would
       // have been read.
       logUsage("run_check", args.command.length, out.length, result.raw.length);
+      return out;
+    }
+    case "run_gate": {
+      const repo = args.repo ?? process.cwd();
+      const gate = await runGate(repo, { stopOnFirst: args.stop_on_first !== false, timeoutMs: args.timeout_ms });
+      const out = renderGate(gate);
+      const raw = gate.results.reduce((n, r) => n + r.result.raw.length, 0);
+      logUsage("run_gate", 0, out.length, raw);
       return out;
     }
     case "code_context": {

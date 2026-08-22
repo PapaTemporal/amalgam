@@ -26,6 +26,7 @@ import { ensureLlama, llamaHealthy, modelInstalled, LLAMA_PORT,
 import { open as openDb } from "../lib/db.mjs";
 import { verifyFact } from "../lib/verify.mjs";
 import { check as runCheck, render as renderCheck } from "../lib/checks.mjs";
+import { runGate, renderGate, detectChecks } from "../lib/gates.mjs";
 // The reclamation rules live in lib/streams.mjs so they can be tested against
 // real repositories; this file only prints what they decide.
 import { git, readStreams, writeStreams, streamKey, inspectStream, classify,
@@ -1416,6 +1417,26 @@ async function cmdCheck(args) {
   process.exitCode = result.code === 0 ? 0 : 1;
 }
 
+/**
+ * Run every check this project defines, and report one verdict.
+ *
+ * The point is what does NOT come back: a passing gate is three lines, and a
+ * failing one is the failures alone. Anything a type checker or a test suite
+ * can decide should never reach a review.
+ */
+async function cmdGate(args) {
+  const repo = args.find((a) => !a.startsWith("--")) ?? process.cwd();
+  if (args.includes("--list")) {
+    const checks = detectChecks(path.resolve(repo));
+    if (!checks.length) return console.log("No checks detected. Add \"amalgam\": { \"checks\": [...] } to package.json.");
+    for (const c of checks) console.log(`  ${c.name.padEnd(10)} ${c.command}`);
+    return;
+  }
+  const gate = await runGate(path.resolve(repo), { stopOnFirst: !args.includes("--all") });
+  console.log(renderGate(gate));
+  process.exitCode = gate.passed === false ? 1 : 0;
+}
+
 // ---------------------------------------------------------------- dispatch
 const [cmd, ...rest] = process.argv.slice(2);
 switch (cmd) {
@@ -1427,6 +1448,7 @@ switch (cmd) {
   case "memory": cmdMemory(rest); break;
   case "task": cmdTask(rest); break;
   case "check": await cmdCheck(rest); break;
+  case "gate": await cmdGate(rest); break;
   case "wire": cmdWire(rest); break;
   case "stream": cmdStream(rest); break;
   case "brief": cmdBrief(rest); break;
@@ -1462,6 +1484,8 @@ Usage:
   amalgam update                    pull, re-deploy, and refresh every wired copy
   amalgam check "<command>"         run a build/test command and print only
                                     what failed, with the exit code
+  amalgam gate [dir] [--list]       run every check this project defines
+                 [--all]            (--list shows what was detected)
   amalgam stats                     measured tool usage — is any of this earning its keep?
   amalgam memory [sub]              verify | list | stale | history — re-check
                                     stored facts against this machine and show

@@ -467,6 +467,48 @@ by arrival and a failure ends up hundreds of lines from its own explanation;
 and a timeout kills the whole process tree, since killing the shell leaves the
 test runner underneath it happily hanging.
 
+### Let the cheap tools rule first
+
+Asking the expensive model "is this change right?" pays frontier prices for a
+question a type checker answers for free. Most of what such a review returns is
+not judgement at all — an unused import, a broken test, a signature that no
+longer matches — and every one of those is settled locally, deterministically,
+in seconds.
+
+`amalgam gate` runs the project's own checks, found from package.json,
+Cargo.toml, go.mod, pytest or a Makefile, cheapest first so a two-second type
+error does not wait behind a four-minute suite. What passes is never mentioned
+again; what fails comes back verbatim, and only that is worth a model's
+attention.
+
+```bash
+amalgam gate --list     # what it detected
+amalgam gate            # run them, stop at the first failure
+```
+
+```text
+gate: passed — 1 check(s)
+  pass  test       26.9s
+
+Nothing needs review that a local check could settle.
+```
+
+A project that disagrees with the detection says so once, in package.json:
+
+```json
+{ "amalgam": { "checks": [{ "name": "ci", "command": "make verify" }] } }
+```
+
+### The injected block is ordered for caching
+
+Everything the session hook prints sits at the front of every conversation on
+the machine, where prompt caching matches on exact prefixes. So the directives
+— identical every time — come first and are never interpolated with anything,
+and every varying part (proposals waiting, streams to reclaim) is appended
+after them. One session-dependent character in the wrong place would invalidate
+that prefix for every session, so `tests/hook-eval.mjs` asserts the static half
+is byte-identical under different state.
+
 ### Recall spends a budget, not a count
 
 Asking for "eight memories" controls neither cost nor redundancy. Eight terse

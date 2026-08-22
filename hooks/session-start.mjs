@@ -12,6 +12,17 @@
  *
  * Output is deliberately terse: it is spent on every single session, and a
  * verbose reminder to save tokens would be self-defeating.
+ *
+ * Order is load-bearing, not cosmetic. Everything injected here sits at the
+ * front of the conversation, where prompt caching works on exact prefixes: as
+ * long as the opening bytes are identical from session to session, they stay
+ * cached, and only what changes is paid for. So the directives — which are the
+ * same every time — come first and are never interpolated with anything, and
+ * every varying part (pending proposals, reclaimable streams) is appended
+ * afterwards. Moving a single session-dependent character into the block above
+ * would invalidate the prefix for every session on the machine, which is why
+ * tests/hook-eval.mjs asserts the static half is byte-identical under
+ * different state.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -60,7 +71,9 @@ try {
   if (modelInstalled()) {
     lines.push("- Before reading a long file or verbose command output in full, use `digest` — the local model reduces it and only the digest enters your context.");
   }
-  process.stdout.write(lines.join("\n") + reclaimHint + "\n");
+  // Static directives first, then everything that varies by session — see the
+  // note at the top of this file about why the order is load-bearing.
+  process.stdout.write(lines.join("\n") + pendingHint + reclaimHint + "\n");
 } catch {
   // never block session start
 }
