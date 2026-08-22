@@ -113,6 +113,37 @@ check("near-duplicate is surfaced for review",
   !hasEmbeddings || /memory_supersede/.test(dup),
   dup.split("\n").slice(1, 3).join(" | ") || "(no candidates offered)");
 
+// --- 6. recall is a budget, not a count ------------------------------------
+// A store written to for months accumulates memories that say nearly the same
+// thing, and facts vary hugely in length — so neither redundancy nor cost is
+// controlled by asking for "eight results".
+// Distinct subjects, deliberately: identical ones would be collapsed by the
+// redundancy rule before the budget ever came into play — which is the right
+// order, and would test the wrong thing here.
+const LONG_FACTS = [
+  "Deployment runs from the pinned release branch; the checklist is followed in order and every step is signed off before the next begins.",
+  "Database migrations are applied ahead of the deploy, in a transaction, and the rollback script is written before the forward one is run.",
+  "Certificates are renewed every ninety days by the scheduled job; a failure pages whoever is on call rather than retrying silently.",
+  "Feature flags default to off in production and are removed within two releases of reaching full rollout, so the branch never becomes permanent.",
+  "Backups are verified by restoring into a scratch environment monthly; an unverified backup is treated as no backup at all.",
+  "Incident notes are written the same day while details are fresh, and the timeline is reconstructed from logs rather than memory.",
+];
+for (const content of LONG_FACTS) await call("memory_save_fact", { content, context: "budget" });
+
+const budgeted = await call("memory_recall", { query: "how do we run deployments and keep production safe", limit: 8, budget_chars: 700 });
+const body = budgeted.split("\n\n(")[0];
+check("a character budget is respected", body.length <= 700,
+  `${body.length} characters returned against a 700 budget`);
+check("and what was left out is stated", /past the 700-character budget/.test(budgeted),
+  budgeted.split("\n\n").pop());
+
+await call("memory_save_fact", { content: "Release runs from the pinned branch; follow the checklist in order.", context: "dupes" });
+await call("memory_save_fact", { content: "Releases run off the pinned branch, following the checklist in order.", context: "dupes" });
+const deduped = await call("memory_recall", { query: "how do releases run", limit: 6, budget_chars: 6000 });
+check("near-duplicates are collapsed",
+  !hasEmbeddings || /near-duplicate/.test(deduped),
+  deduped.split("\n\n").pop());
+
 console.log(`\n${failed ? `${failed} check(s) failed` : "all checks passed"}`);
 try { srv.kill(); } catch {}
 try { fs.rmSync(TMP, { recursive: true, force: true }); } catch {}

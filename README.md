@@ -433,6 +433,28 @@ the wasted read this is trying to avoid. On this repo that removes 4.4% of
 caller edges. It also means a stale graph degrades honestly instead of
 confidently pointing at code that has moved.
 
+### Recall spends a budget, not a count
+
+Asking for "eight memories" controls neither cost nor redundancy. Eight terse
+facts and eight long ones differ by an order of magnitude in the thing this
+project exists to conserve, and a store written to for months accumulates
+memories that say nearly the same thing — so the head of a ranked list can be
+four phrasings of one answer while the fact that would have completed the
+picture sits fifth.
+
+Recall now selects rather than slicing. Candidates are taken in rank order
+while they fit a character budget (`budget_chars`, 6000 by default), and one
+that is ≥0.93 cosine to something already chosen is dropped as redundant —
+measured against the selection, never against the query, since two memories can
+both answer it well and still be the same memory twice.
+
+What was left out is always stated, because a silently truncated answer reads
+exactly like a complete one:
+
+```text
+(1 near-duplicate(s) omitted; 4 more matched, past the 6000-character budget)
+```
+
 ### Capture that does not depend on remembering
 
 Memory only pays for itself if things get written to it, and the original

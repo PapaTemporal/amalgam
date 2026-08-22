@@ -204,6 +204,7 @@ const TOOLS = [
       properties: {
         query: { type: "string", description: "Plain-language search terms" },
         limit: { type: "integer", default: 8, minimum: 1, maximum: 50 },
+        budget_chars: { type: "integer", default: 6000, minimum: 500, maximum: 40000, description: "Stop returning memories past this much text — a count is a poor budget when facts vary in length" },
         include_raw: { type: "boolean", default: false, description: "Also search raw L0 conversation log" },
         include_superseded: { type: "boolean", default: false, description: "Also return facts that a later fact replaced (history; off by default)" },
       },
@@ -437,7 +438,7 @@ async function handleTool(name, args) {
           `SELECT f.id, f.kind, f.context, f.content, f.verify_state, f.verify_note, bm25(l1_fts) AS rank
              FROM l1_fts JOIN l1_facts f ON f.id = l1_fts.rowid
             WHERE l1_fts MATCH ?${supersededFilter.replace(/superseded_by/, 'f.superseded_by')} ORDER BY rank LIMIT ?`).all(q, limit * 2)) {
-          keyword.push({ key: `L1:${r.id}`, line: factLine(r) });
+          keyword.push({ key: `L1:${r.id}`, line: factLine(r), vec: null });
         }
         for (const r of d.prepare(
           `SELECT path, summary, substr(content, 1, 1200) AS content, bm25(l2_fts) AS rank
@@ -467,18 +468,17 @@ async function handleTool(name, args) {
             for (const r of d.prepare(
               `SELECT id, kind, context, content, verify_state, verify_note, embedding
                  FROM l1_facts WHERE embedding IS NOT NULL${supersededFilter}`).all()) {
-              scored.push({
-                score: similarity(qv, fromBlob(r.embedding)),
-                key: `L1:${r.id}`,
-                line: factLine(r),
-              });
+              const v = fromBlob(r.embedding);
+              scored.push({ score: similarity(qv, v), key: `L1:${r.id}`, line: factLine(r), vec: v });
             }
             for (const r of d.prepare(
               `SELECT path, summary, substr(content,1,1200) AS content, embedding FROM l2_scenarios WHERE embedding IS NOT NULL`).all()) {
+              const v2 = fromBlob(r.embedding);
               scored.push({
-                score: similarity(qv, fromBlob(r.embedding)),
+                score: similarity(qv, v2),
                 key: `L2:${r.path}`,
                 line: `[L2:${r.path}] (scenario${r.summary ? ` @${r.summary}` : ""}) ${r.content}`,
+                vec: v2,
               });
             }
             semantic = scored.sort((a, b) => b.score - a.score).slice(0, limit * 2);
@@ -502,16 +502,44 @@ async function handleTool(name, args) {
       for (const s of semantic) {
         if (seen.has(s.key)) continue;
         seen.add(s.key);
-        ordered.push(s.line);
+        ordered.push(s);
       }
       for (const k of keyword) {
         if (seen.has(k.key)) continue;
         seen.add(k.key);
-        ordered.push(k.line);
+        ordered.push(k);
       }
-      const out = ordered.slice(0, limit).join("\n");
+
+      // Selection, rather than a slice off the top. A count is a poor budget:
+      // eight terse facts and eight long ones cost wildly different amounts of
+      // the thing this project exists to conserve. And a store written to for
+      // months accumulates memories saying nearly the same thing, so the head
+      // of a ranked list can be four phrasings of one answer while the fact
+      // that would have completed the picture sits fifth.
+      const budget = Math.min(Math.max(args.budget_chars ?? 6000, 500), 40000);
+      const selected = [];
+      let used = 0, duplicates = 0, overflow = 0;
+      for (const cand of ordered) {
+        if (selected.length >= limit) { overflow++; continue; }
+        // Redundancy is measured against what has already been chosen, never
+        // against the query: two memories can both answer it well and still be
+        // the same memory twice.
+        if (cand.vec && selected.some((s) => s.vec && similarity(cand.vec, s.vec) >= 0.93)) { duplicates++; continue; }
+        if (used + cand.line.length > budget && selected.length) { overflow++; continue; }
+        selected.push(cand);
+        used += cand.line.length;
+      }
+
+      // What was left out is worth a line: a silently truncated answer reads
+      // like a complete one.
+      const notes = [];
+      if (duplicates) notes.push(`${duplicates} near-duplicate(s) omitted`);
+      if (overflow) notes.push(`${overflow} more matched, past the ${budget}-character budget`);
+      if (!semanticUsed) notes.push("keyword search only — install semantic recall with `amalgam install --with-embeddings`");
+
+      const out = selected.map((c) => c.line).join("\n") + (notes.length ? `\n\n(${notes.join("; ")})` : "");
       logUsage("memory_recall", String(args.query).length, out.length);
-      return semanticUsed ? out : out + "\n\n(keyword search only — install semantic recall with `amalgam install --with-embeddings`)";
+      return out;
     }
     case "memory_save_fact": {
       const d = db();

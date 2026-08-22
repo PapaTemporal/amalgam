@@ -93,6 +93,10 @@ them and their expensive build directories alone.
 - **Write memories caveman-dense yourself.** When saving facts you distilled,
   drop articles/filler; keep every fact, name, number, path, command exact.
 
+When recall ends with a note in brackets — near-duplicates omitted, or more
+matched past the budget — that is the answer telling you it was trimmed. Raise
+`budget_chars` or narrow the query if the missing part mattered.
+
 ## Session end / after important exchanges
 
 - `memory_save_fact` — one call per durable fact/preference/decision/constraint
