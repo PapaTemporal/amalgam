@@ -25,6 +25,11 @@ import { ensureLlama, llamaHealthy, modelInstalled, LLAMA_PORT,
          stopLlama, minutesIdle, IDLE_MINUTES } from "../lib/services.mjs";
 import { open as openDb } from "../lib/db.mjs";
 import { verifyFact } from "../lib/verify.mjs";
+// The reclamation rules live in lib/streams.mjs so they can be tested against
+// real repositories; this file only prints what they decide.
+import { git, readStreams, writeStreams, streamKey, inspectStream, classify,
+         buildDirs, dirSize, human, BUILD_DIR_RE, plan as planGc, apply as applyGc,
+         STREAMS_DB } from "../lib/streams.mjs";
 import { importGraph, indexStatus } from "../lib/graphdb.mjs";
 import { listPending, countPending, acceptPending, rejectPending,
          pruneRaw, forgetRaw, RAW_DAYS, RAW_MAX_ROWS } from "../lib/capture.mjs";
@@ -1061,91 +1066,6 @@ function cmdBrief(args) {
 // they are treated as reclaimable: every stream carries enough state to
 // decide, later and without a human remembering, whether it can be freed.
 
-const STREAMS_DB = path.join(HOME, "streams.json");
-// Build output dirs to reclaim. Matched at the worktree root only.
-const BUILD_DIR_RE = /^(build|build[-.].*|.*\.build|cmake-build-.*|out|target|node_modules)$/i;
-
-function git(repo, args, opts = {}) {
-  const r = spawnSync("git", ["-C", repo, ...args], { encoding: "utf8", ...opts });
-  return { ok: r.status === 0, out: (r.stdout ?? "").trim(), err: (r.stderr ?? "").trim() };
-}
-
-function readStreams() {
-  try { return JSON.parse(fs.readFileSync(STREAMS_DB, "utf8")); } catch { return { streams: {} }; }
-}
-function writeStreams(db) {
-  fs.mkdirSync(path.dirname(STREAMS_DB), { recursive: true });
-  fs.writeFileSync(STREAMS_DB, JSON.stringify(db, null, 2) + "\n");
-}
-const streamKey = (repo, name) => `${path.basename(repo)}::${name}`;
-
-function dirSize(dir) {
-  let total = 0;
-  try {
-    for (const e of fs.readdirSync(dir, { recursive: true, withFileTypes: true })) {
-      if (!e.isFile()) continue;
-      try { total += fs.statSync(path.join(e.parentPath ?? e.path, e.name)).size; } catch {}
-    }
-  } catch {}
-  return total;
-}
-const human = (b) => (b > 1e9 ? `${(b / 1e9).toFixed(1)} GB` : b > 1e6 ? `${(b / 1e6).toFixed(0)} MB` : `${(b / 1e3).toFixed(0)} KB`);
-
-function buildDirs(worktree) {
-  try {
-    return fs.readdirSync(worktree, { withFileTypes: true })
-      .filter((e) => e.isDirectory() && BUILD_DIR_RE.test(e.name))
-      .map((e) => path.join(worktree, e.name));
-  } catch { return []; }
-}
-
-/** Everything needed to judge whether a stream is still worth its disk. */
-function inspectStream(rec, { sizes = true } = {}) {
-  const exists = fs.existsSync(rec.path);
-  const st = { ...rec, exists, dirty: false, merged: false, ageDays: null, builds: [], buildBytes: 0, unmergedCommits: 0 };
-  if (!exists) return st;
-  // "Dirty" must mean work at risk, not build output. Untracked files inside
-  // a build dir are expected in any compiled worktree; counting them would
-  // make every built stream permanently unreclaimable.
-  st.dirty = git(rec.path, ["status", "--porcelain"]).out
-    .split("\n").filter(Boolean)
-    .some((line) => {
-      const p = line.slice(3).replace(/^"|"$/g, "");
-      if (!line.startsWith("??")) return true;             // tracked change
-      return !BUILD_DIR_RE.test(p.split("/")[0]);          // untracked non-build file
-    });
-  st.merged = git(rec.repo, ["merge-base", "--is-ancestor", rec.branch, rec.base]).ok;
-  const last = git(rec.path, ["log", "-1", "--format=%ct"]).out;
-  if (last) st.ageDays = Math.floor((Date.now() / 1000 - Number(last)) / 86400);
-  const ahead = git(rec.repo, ["rev-list", "--count", `${rec.base}..${rec.branch}`]).out;
-  st.unmergedCommits = Number(ahead || 0);
-  st.builds = buildDirs(rec.path);
-  if (sizes) st.buildBytes = st.builds.reduce((n, d) => n + dirSize(d), 0);
-  return st;
-}
-
-/**
- * Reclamation policy. Two tiers, because losing a build dir costs time while
- * losing an unmerged worktree costs work:
- *   remove  — whole worktree: merged, or explicitly evaluated; never dirty
- *   builds  — free build output only, keep the code: stale but still open
- */
-function classify(st, maxAgeDays) {
-  if (!st.exists) return { action: "forget", why: "worktree directory is gone" };
-  if (st.dirty) return { action: "keep", why: "uncommitted changes — never auto-removed" };
-  // Pinned streams keep their (expensive) warm build dir across cycles —
-  // e.g. the nightly worktree, where a cold rebuild costs far more than disk.
-  if (st.pinned) return { action: "keep", why: "pinned (persistent worktree)" };
-  if (st.merged) return { action: "remove", why: `merged into ${st.base}` };
-  if (st.evaluated) return { action: "remove", why: `marked done ${st.evaluatedAt?.slice(0, 10) ?? ""}`.trim() };
-  if (st.ageDays !== null && st.ageDays >= maxAgeDays) {
-    return st.buildBytes > 0
-      ? { action: "builds", why: `no commits in ${st.ageDays}d, ${st.unmergedCommits} unmerged commit(s) kept` }
-      : { action: "keep", why: `stale (${st.ageDays}d) but nothing to reclaim` };
-  }
-  return { action: "keep", why: "active" };
-}
-
 function cmdStream(args) {
   const [sub, ...rest] = args;
   const flag = (n) => rest.includes(n);
@@ -1233,60 +1153,33 @@ When you have judged the result:  amalgam stream done ${name} --repo ${repo}`);
 
     case "gc": {
       const execute = flag("--yes");
-      const maxAge = Number(opt("--max-age-days", 14));
-      const buildsOnly = flag("--builds-only");
-      const recs = Object.values(db.streams);
-      if (recs.length === 0) { console.log("No streams registered."); break; }
-      console.log(`${execute ? "Reclaiming" : "Plan (nothing will be deleted — add --yes to execute)"}:\n`);
-      let freed = 0, removed = 0, cleaned = 0;
-      for (const rec of recs) {
-        const st = inspectStream(rec);
-        let { action, why } = classify(st, maxAge);
-        if (buildsOnly && action === "remove") action = st.buildBytes > 0 ? "builds" : "keep";
-        const key = streamKey(rec.repo, rec.name);
+      const planned = planGc(db, {
+        maxAgeDays: Number(opt("--max-age-days", 14)),
+        buildsOnly: flag("--builds-only"),
+      });
+      if (planned.length === 0) { console.log("No streams registered."); break; }
 
-        if (action === "keep") { console.log(`  keep    ${st.name} — ${why}`); continue; }
+      console.log(`${execute ? "Reclaiming" : "Plan (nothing will be deleted — add --yes to execute)"}:
+`);
+      for (const p of planned) {
+        const size = p.bytes ? ` — ${p.action === "builds" ? "free " : "frees "}${human(p.bytes)}${p.action === "remove" ? "+" : ""}` : "";
+        console.log(`  ${p.action.padEnd(7)} ${p.state.name} — ${p.why}${size}`);
+      }
+      if (!execute) break;
 
-        if (action === "forget") {
-          console.log(`  forget  ${st.name} — ${why}`);
-          if (execute) { git(rec.repo, ["worktree", "prune"]); delete db.streams[key]; }
-          continue;
-        }
-
-        if (action === "builds") {
-          console.log(`  builds  ${st.name} — free ${human(st.buildBytes)} — ${why}`);
-          if (execute) {
-            for (const d of st.builds) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
-            freed += st.buildBytes; cleaned++;
+      const totals = applyGc(db, planned, {
+        onEvent: (e) => {
+          if (e.done === "failed") console.log(`          ! ${e.error} (skipped)`);
+          else if (e.done === "removed" && e.branch !== "deleted") {
+            console.log(`          branch ${e.state.branch} ${e.branch} (unmerged work preserved)`);
           }
-          continue;
-        }
-
-        // remove: worktree + branch (branch only when truly merged)
-        const total = st.buildBytes;
-        console.log(`  remove  ${st.name} — ${why}${st.buildBytes ? ` — frees ${human(st.buildBytes)}+` : ""}`);
-        if (execute) {
-          // Clear build output first: it is the bulk of the bytes, and git
-          // refuses to remove a worktree containing untracked files. Our own
-          // dirty check (stricter about real work, lenient about build dirs)
-          // already passed, so --force here cannot discard actual work.
-          for (const d of st.builds) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
-          let r = git(rec.repo, ["worktree", "remove", st.path]);
-          if (!r.ok) r = git(rec.repo, ["worktree", "remove", "--force", st.path]);
-          if (!r.ok) { console.log(`          ! ${r.err.split("\n")[0]} (skipped)`); continue; }
-          if (st.merged) git(rec.repo, ["branch", "-d", st.branch]);
-          else console.log(`          branch ${st.branch} kept (unmerged work preserved)`);
-          delete db.streams[key];
-          freed += total; removed++;
-        }
-      }
-      if (execute) {
-        writeStreams(db);
-        console.log(`\nDone: ${removed} worktree(s) removed, ${cleaned} build dir set(s) cleared, ~${human(freed)} freed.`);
-      }
+        },
+      });
+      console.log(`
+Done: ${totals.removed} worktree(s) removed, ${totals.cleaned} build dir set(s) cleared, ` +
+        `${totals.forgotten} registration(s) forgotten, ~${human(totals.freed)} freed.`);
       break;
     }
-
     case "drop": {
       requireRepo();
       const name = rest[0];
