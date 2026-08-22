@@ -28,6 +28,16 @@ try {
   // Nothing to start: memory is a SQLite file opened on demand, and the
   // optional model starts itself only when a tool actually needs it.
 
+  // Facts the last session proposed and nobody has looked at yet. Surfaced
+  // here because a proposal nobody sees is the same as no capture at all.
+  let pendingHint = "";
+  try {
+    const { countPending } = await import("../lib/capture.mjs");
+    const n = countPending();
+    if (n > 0) pendingHint = `
+- ${n} fact(s) proposed by an earlier session are waiting: review with \`amalgam memory pending\`, then accept or reject.`;
+  } catch {}
+
   // Cheap reclaim check: registry only, no disk scanning.
   let reclaimHint = "";
   try {

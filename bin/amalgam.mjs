@@ -25,6 +25,7 @@ import { ensureLlama, llamaHealthy, modelInstalled, LLAMA_PORT } from "../lib/se
 import { open as openDb } from "../lib/db.mjs";
 import { verifyFact } from "../lib/verify.mjs";
 import { importGraph, indexStatus } from "../lib/graphdb.mjs";
+import { listPending, countPending, acceptPending, rejectPending } from "../lib/capture.mjs";
 import { embed, toBlob, embeddingsInstalled } from "../lib/embed.mjs";
 import { createTask, addEvent, setState, listTasks, resume, renderResume } from "../lib/tasks.mjs";
 
@@ -481,18 +482,21 @@ function wireUser() {
   }
   console.log(`Skills -> ${USER_SKILLS_DIR} (offload, caveman, start)`);
 
-  const hookPath = path.join(HOME, "hooks", "session-start.mjs");
-  if (fs.existsSync(hookPath)) {
+  // Two hooks, same shape: one injects the offload directives as a session
+  // begins, the other records what the session learned as it ends.
+  for (const [event, file] of [["SessionStart", "session-start.mjs"], ["SessionEnd", "session-end.mjs"]]) {
+    const hookPath = path.join(HOME, "hooks", file);
+    if (!fs.existsSync(hookPath)) continue;
     backupOnce(USER_SETTINGS);
     mergeJsonFile(USER_SETTINGS, (o) => {
       o.hooks ??= {};
-      o.hooks.SessionStart ??= [];
-      const already = o.hooks.SessionStart.some((entry) =>
-        (entry.hooks ?? []).some((h) => typeof h.command === "string" && h.command.includes("session-start.mjs"))
+      o.hooks[event] ??= [];
+      const already = o.hooks[event].some((entry) =>
+        (entry.hooks ?? []).some((h) => typeof h.command === "string" && h.command.includes(file))
       );
-      if (!already) o.hooks.SessionStart.push({ hooks: [{ type: "command", command: `node "${hookPath}"` }] });
+      if (!already) o.hooks[event].push({ hooks: [{ type: "command", command: `node "${hookPath}"` }] });
     });
-    console.log(`SessionStart hook -> ${USER_SETTINGS}`);
+    console.log(`${event} hook -> ${USER_SETTINGS}`);
   }
 
   // MCP at user scope lives in ~/.claude.json. That file holds unrelated user
@@ -574,12 +578,15 @@ function cmdWire(args) {
     if (fs.existsSync(hookPath)) {
       mergeJsonFile(path.join(proj, ".claude", "settings.json"), (o) => {
         o.hooks ??= {};
-        o.hooks.SessionStart ??= [];
-        const cmd = `node "${hookPath}"`;
-        const already = o.hooks.SessionStart.some((entry) =>
-          (entry.hooks ?? []).some((h) => typeof h.command === "string" && h.command.includes("session-start.mjs"))
-        );
-        if (!already) o.hooks.SessionStart.push({ hooks: [{ type: "command", command: cmd }] });
+        for (const [event, file] of [["SessionStart", "session-start.mjs"], ["SessionEnd", "session-end.mjs"]]) {
+          const p = path.join(HOME, "hooks", file);
+          if (!fs.existsSync(p)) continue;
+          o.hooks[event] ??= [];
+          const already = o.hooks[event].some((entry) =>
+            (entry.hooks ?? []).some((h) => typeof h.command === "string" && h.command.includes(file))
+          );
+          if (!already) o.hooks[event].push({ hooks: [{ type: "command", command: `node "${p}"` }] });
+        }
       });
       console.log("Claude Code wired: .mcp.json + .claude/skills/{offload,caveman,start} + SessionStart hook");
     } else {
@@ -1350,6 +1357,32 @@ Stale means a path named in the fact is gone. Fix the fact, or save a corrected 
     return;
   }
 
+  // Proposals from the session-end capture. Deliberately a separate step from
+  // saving: a memory nobody approved is a memory nobody can be held to, and
+  // recall treats every fact as equally true.
+  if (sub === "pending") {
+    const rows = listPending(50);
+    if (!rows.length) return console.log("no proposals waiting");
+    for (const r of rows) console.log(`  ${String(r.id).padStart(3)}  [${r.kind}] ${r.content}`);
+    console.log(`
+accept with: amalgam memory accept ${rows[0].id}${rows.length > 1 ? " <id>..." : ""}   (or --all)`);
+    console.log(`reject with: amalgam memory reject <id>...`);
+    return;
+  }
+
+  if (sub === "accept" || sub === "reject") {
+    const rest = args.slice(1);
+    const ids = rest.includes("--all")
+      ? listPending(500).map((r) => r.id)
+      : rest.filter((a) => /^\d+$/.test(a)).map(Number);
+    if (!ids.length) return console.log(`usage: amalgam memory ${sub} <id>... | --all`);
+    if (sub === "reject") return console.log(`rejected ${rejectPending(ids)} proposal(s)`);
+    const saved = acceptPending(ids, { verifyFact });
+    for (const s of saved) console.log(`  proposal ${s.pending} -> L1:${s.fact}${s.state === "stale" ? "  (stale: names a path that does not exist)" : ""}`);
+    console.log(`accepted ${saved.length} proposal(s) into memory`);
+    return;
+  }
+
   if (sub === "stale" || sub === "list") {
     const where = sub === "stale" ? "verify_state = 'stale' AND superseded_by IS NULL" : "superseded_by IS NULL";
     for (const r of d.prepare(`SELECT id, kind, context, verify_state, content FROM l1_facts WHERE ${where} ORDER BY id`).all()) {
@@ -1367,7 +1400,7 @@ Stale means a path named in the fact is gone. Fix the fact, or save a corrected 
     return;
   }
 
-  console.log("usage: amalgam memory [verify|list|stale|history]");
+  console.log("usage: amalgam memory [verify|list|stale|history|pending|accept|reject]");
 }
 
 // ================================================================== tasks
@@ -1486,7 +1519,9 @@ Usage:
   amalgam stats                     measured tool usage — is any of this earning its keep?
   amalgam memory [sub]              verify | list | stale | history — re-check
                                     stored facts against this machine and show
-                                    what drifted or was superseded
+                                    what drifted or was superseded;
+                                    pending | accept | reject — review the facts
+                                    a finished session proposed
   amalgam task [sub]                list | new | note | show | done — the work
                                     item tying a story, branch, stream and what
                                     was learned into one resumable thread

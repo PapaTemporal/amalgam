@@ -433,6 +433,41 @@ the wasted read this is trying to avoid. On this repo that removes 4.4% of
 caller edges. It also means a stale graph degrades honestly instead of
 confidently pointing at code that has moved.
 
+### Capture that does not depend on remembering
+
+Memory only pays for itself if things get written to it, and the original
+design asked the agent to do that at the end of a session — precisely when its
+context is most exhausted and its attention is on finishing. Predictably, the
+raw layer sat empty for weeks.
+
+A SessionEnd hook now writes the session's own record, in two tiers so that a
+machine with no model download still gets the useful half:
+
+- **always** — the conversation's turns are logged to L0 (tool traffic
+  dropped: it is the bulk of a session and the least durable part of it);
+- **with the local model** — a detached child distils that transcript into
+  candidate facts, asking specifically for what stays true rather than what was
+  happening at the time.
+
+The timing is deliberate: the cheap half runs inside the hook, the slow half is
+handed to a background process and forgotten, so nothing can delay a session
+ending and nothing it fails at can prevent one.
+
+**Candidates are proposals, never memories.** Writing unattended model output
+straight into long-term memory would poison the store everything else depends
+on — a wrong fact recalled with confidence is the most expensive failure this
+project has. They wait for review, and the next session is told they are
+waiting:
+
+```bash
+amalgam memory pending          # what the last session proposed
+amalgam memory accept 3 4       # into memory, verified on the way in
+amalgam memory reject 5         # or not
+```
+
+A 4B model padding four near-identical lines out of a thin session is exactly
+the behaviour the review step exists for.
+
 ### Keeping a memory honest
 
 A store that answers quickly and confidently with last month's truth is worse

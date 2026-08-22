@@ -108,7 +108,15 @@ them and their expensive build directories alone.
   state changed (current plan, build quirks, decisions).
 - `memory_persona_write` — only when stable user preferences changed; read,
   merge, rewrite whole doc.
-- `memory_log` — only for exchanges worth keeping verbatim.
+- `memory_log` — only for exchanges worth keeping verbatim. The session end
+  logs the conversation to L0 by itself, so this is for things worth keeping
+  before then.
+
+If the session opened with a note that facts are waiting review, run
+`amalgam memory pending` and deal with them: accept what is durable and true,
+reject the rest. They came from a small local model reading the last
+transcript, so treat them as suggestions — the ones worth keeping usually need
+their wording tightened first.
 
 ## Showing memory to the user
 
