@@ -468,6 +468,37 @@ amalgam memory reject 5         # or not
 A 4B model padding four near-identical lines out of a thin session is exactly
 the behaviour the review step exists for.
 
+**What it stores, and for how long.** Capture changes what this store is: from
+the things somebody chose to keep, to everything that was said. That is a
+reasonable default for a local single-user tool and an unreasonable one to
+impose, so:
+
+- turns are **redacted on the way in** — private key blocks, API keys, GitHub
+  and Slack tokens, AWS key ids, JWTs, `Authorization:` headers, URL
+  credentials, and any assignment whose name announces a secret
+  (`*_TOKEN`, `*_PASSWORD`, `*_SECRET`, …). There is deliberately no general
+  high-entropy rule: it would eat commit hashes and digests, and a log full of
+  `[redacted]` is its own kind of useless. This catches known shapes, not
+  everything — it is a safety net, not a guarantee;
+- the raw layer is **capped and aged out** — 30 days and 5,000 turns by
+  default (`AMALGAM_L0_DAYS`, `AMALGAM_L0_MAX_ROWS`), pruned on every write;
+- it can be **turned off entirely** with `AMALGAM_CAPTURE=off`, and deleted at
+  any time with `amalgam memory forget --all`, which never touches distilled
+  facts.
+
+### The model does not sit there
+
+Lazy start was only half the bargain: a model that loads on demand and then
+holds 3.6 GB until the machine reboots costs more than one that started
+eagerly, because the cost is invisible — no session mentions it and nobody
+thinks to run `amalgam stop` hours later.
+
+Every model call now stamps a use file, and starting the server also starts a
+detached watchdog that shuts it down after 15 minutes idle
+(`AMALGAM_LLAMA_IDLE_MIN`, `0` to disable). The watchdog exits on its own when
+the server is gone, so an idle machine ends up running neither. `amalgam
+status` shows how long the model has been idle and when it will go.
+
 ### Keeping a memory honest
 
 A store that answers quickly and confidently with last month's truth is worse

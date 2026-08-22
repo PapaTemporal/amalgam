@@ -33,7 +33,8 @@ const sessionId = payload.session_id ?? "unknown";
 
 try {
   if (transcript && fs.existsSync(transcript)) {
-    const { readTranscript, logTurns } = await import("../lib/capture.mjs");
+    const { readTranscript, logTurns, captureEnabled } = await import("../lib/capture.mjs");
+    if (!captureEnabled()) process.exit(0);
     const turns = readTranscript(transcript);
     if (turns.length) {
       logTurns(turns, sessionId);

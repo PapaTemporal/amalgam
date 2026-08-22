@@ -21,11 +21,13 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
-import { ensureLlama, llamaHealthy, modelInstalled, LLAMA_PORT } from "../lib/services.mjs";
+import { ensureLlama, llamaHealthy, modelInstalled, LLAMA_PORT,
+         stopLlama, minutesIdle, IDLE_MINUTES } from "../lib/services.mjs";
 import { open as openDb } from "../lib/db.mjs";
 import { verifyFact } from "../lib/verify.mjs";
 import { importGraph, indexStatus } from "../lib/graphdb.mjs";
-import { listPending, countPending, acceptPending, rejectPending } from "../lib/capture.mjs";
+import { listPending, countPending, acceptPending, rejectPending,
+         pruneRaw, forgetRaw, RAW_DAYS, RAW_MAX_ROWS } from "../lib/capture.mjs";
 import { embed, toBlob, embeddingsInstalled } from "../lib/embed.mjs";
 import { createTask, addEvent, setState, listTasks, resume, renderResume } from "../lib/tasks.mjs";
 
@@ -367,8 +369,7 @@ async function cmdStart() {
 }
 
 function cmdStop() {
-  if (WIN) spawnSync("taskkill", ["/IM", "llama-server.exe", "/F"], { stdio: "ignore" });
-  else spawnSync("pkill", ["-f", "llama-server"], { stdio: "ignore" });
+  stopLlama();
   console.log("llama-server stopped (if it was running). Memory needs no shutdown.");
 }
 
@@ -377,7 +378,13 @@ async function cmdStatus() {
   const dbFile = path.join(HOME, "data", "memory.db");
   const size = fs.existsSync(dbFile) ? `${(fs.statSync(dbFile).size / 1e6).toFixed(1)} MB` : "not created yet";
   console.log(`memory      : SQLite (${dbFile}) — ${size}`);
-  console.log(`local model : ${!modelInstalled() ? "not installed (optional)" : (await llamaHealthy()) ? `running (port ${LLAMA_PORT})` : "installed, not running (starts on first use)"}`);
+  const idle = minutesIdle();
+  const idleNote = IDLE_MINUTES
+    ? `, idle ${idle === null ? "?" : Math.floor(idle)}m of ${IDLE_MINUTES}m before shutdown`
+    : ", idle shutdown disabled";
+  console.log(`local model : ${!modelInstalled() ? "not installed (optional)"
+    : (await llamaHealthy()) ? `running (port ${LLAMA_PORT}${idleNote})`
+    : "installed, not running (starts on first use)"}`);
   const uv = spawnSync("uv", ["--version"], { encoding: "utf8" });
   console.log(`uv (graphify): ${uv.status === 0 ? uv.stdout.trim() : "uv not found — graph build/query unavailable"}`);
 }
@@ -1383,6 +1390,29 @@ accept with: amalgam memory accept ${rows[0].id}${rows.length > 1 ? " <id>..." :
     return;
   }
 
+  // The raw layer is the one table that grows without anyone choosing to add
+  // to it, so it is the one that needs both a limit and a delete button.
+  if (sub === "prune") {
+    const removed = pruneRaw();
+    const left = d.prepare(`SELECT count(*) AS n FROM l0_log`).get().n;
+    console.log(`removed ${removed} raw turn(s); ${left} kept (window ${RAW_DAYS} days, cap ${RAW_MAX_ROWS} rows)`);
+    return;
+  }
+
+  if (sub === "forget") {
+    const rest = args.slice(1);
+    const idx = rest.indexOf("--session");
+    const session = idx >= 0 ? rest[idx + 1] : null;
+    if (!session && !rest.includes("--all")) {
+      const n = d.prepare(`SELECT count(*) AS n FROM l0_log`).get().n;
+      console.log(`usage: amalgam memory forget --session <id> | --all`);
+      console.log(`${n} raw turn(s) stored. Distilled facts are never touched by this.`);
+      return;
+    }
+    console.log(`forgot ${forgetRaw({ session })} raw turn(s)${session ? ` from session ${session}` : ""}`);
+    return;
+  }
+
   if (sub === "stale" || sub === "list") {
     const where = sub === "stale" ? "verify_state = 'stale' AND superseded_by IS NULL" : "superseded_by IS NULL";
     for (const r of d.prepare(`SELECT id, kind, context, verify_state, content FROM l1_facts WHERE ${where} ORDER BY id`).all()) {
@@ -1400,7 +1430,7 @@ accept with: amalgam memory accept ${rows[0].id}${rows.length > 1 ? " <id>..." :
     return;
   }
 
-  console.log("usage: amalgam memory [verify|list|stale|history|pending|accept|reject]");
+  console.log("usage: amalgam memory [verify|list|stale|history|pending|accept|reject|prune|forget]");
 }
 
 // ================================================================== tasks
@@ -1521,7 +1551,9 @@ Usage:
                                     stored facts against this machine and show
                                     what drifted or was superseded;
                                     pending | accept | reject — review the facts
-                                    a finished session proposed
+                                    a finished session proposed;
+                                    prune | forget — apply retention to the raw
+                                    session log, or delete it outright
   amalgam task [sub]                list | new | note | show | done — the work
                                     item tying a story, branch, stream and what
                                     was learned into one resumable thread
