@@ -150,7 +150,7 @@ const TOOLS = [
       properties: {
         kind: { type: "string", enum: ["fact", "preference", "decision", "constraint", "instruction"], default: "fact" },
         content: { type: "string", description: "Caveman-dense fact text" },
-        context: { type: "string", default: "", description: "Project/topic tag, e.g. 'musescore'" },
+        context: { type: "string", default: "", description: "Project/topic tag, e.g. 'api-server'" },
         priority: { type: "integer", default: 50, minimum: 0, maximum: 100 },
       },
       required: ["content"],
@@ -180,7 +180,7 @@ const TOOLS = [
   {
     name: "memory_context_write",
     description:
-      "Create or overwrite a scenario document (L2) — durable project context: build steps, architecture notes, conventions, current plan. Write content caveman-dense. Path is virtual, e.g. 'musescore/build-notes'.",
+      "Create or overwrite a scenario document (L2) — durable project context: build steps, architecture notes, conventions, current plan. Write content caveman-dense. Path is virtual, e.g. 'api-server/build-notes'.",
     inputSchema: {
       type: "object",
       properties: {

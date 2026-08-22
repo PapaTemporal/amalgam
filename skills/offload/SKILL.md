@@ -82,7 +82,7 @@ them and their expensive build directories alone.
 ## Session end / after important exchanges
 
 - `memory_save_fact` — one call per durable fact/preference/decision/constraint
-  learned this session (tag `context` with the project, e.g. 'musescore').
+  learned this session (tag `context` with the project, e.g. 'api-server').
 - `memory_context_write` — update the project's scenario doc if the working
   state changed (current plan, build quirks, decisions).
 - `memory_persona_write` — only when stable user preferences changed; read,

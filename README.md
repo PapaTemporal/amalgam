@@ -153,13 +153,13 @@ workflows then reason across the whole system and write their documents at the
 workspace level.
 
 ```text
-code/                        <- workspace: BMAD installed HERE
+workspace/                   <- workspace: BMAD installed HERE
 ├── _bmad/                   BMAD config, scripts, modules
 ├── _bmad-output/            PRDs, epics, stories, project docs for ALL services
 ├── .claude/skills/          bmad-* workflows + amalgam skills
-├── MuseScore/               service (cloned repo) — no BMAD inside it
-├── pedalboard/              service
-└── amalgam-pkg/             service
+├── api-server/              service (cloned repo) — no BMAD inside it
+├── web-client/              service
+└── shared-lib/              service
 ```
 
 ```bash
@@ -202,18 +202,24 @@ node bin/amalgam.mjs stats    # measured tool usage — is this earning its keep
 node bin/amalgam.mjs graph    # build/refresh the code graph (see below)
 ```
 
-`graph` acts on the **current directory** unless you pass a path, and a graph
-belongs to **one service**, not a whole workspace:
+A graph belongs to **one service**, never to a whole workspace — mixing several
+codebases into a single index produces a graph too muddled to answer anything
+well. So `graph` builds one graph per service, and picks its targets from where
+you run it:
 
 ```bash
-cd MuseScore && amalgam graph        # from inside the service
-amalgam graph /path/to/MuseScore    # or name it from anywhere
-amalgam graph --check                # is this one stale?
+cd api-server && amalgam graph       # inside a repo: that repo
+amalgam graph /path/to/api-server    # an explicit path: exactly that, nothing else
+amalgam graph --directory ../web     # same, when the path could be mistaken for a flag
+amalgam graph                        # at a workspace root: every service, one graph each
+amalgam graph --check                # report staleness instead of rebuilding
 ```
 
-Run from a workspace root it refuses and lists the services, since indexing
-every service plus whatever tooling sits beside them produces a graph too
-mixed to answer anything well.
+At a workspace root — a directory that is not itself a repo but holds two or
+more — it walks every service and gives each its own graph. Directories not
+under version control are skipped, since those are usually vendored tools or
+downloads rather than code you are working on; `--all` includes them. Pass
+`--sql` to parse `.sql` files as well.
 
 
 `amalgam graph` wraps graphify with `--code-only`, which keeps it on its local
@@ -312,12 +318,12 @@ amalgam brief C:\path\to\repo     # a specific project
 ```
 
 ```text
-PROJECT  MuseScore  (C:\Users\kinth\code\MuseScore)
+PROJECT  api-server  (C:\path\to\workspace\api-server)
 GIT      branch main | 3 uncommitted change(s)
-         open branches: fix/20260820-paste-midmeasure-barline
+         open branches: fix/20260820-null-session-token
 STREAMS  none
 BMAD     installed | 49 bmad skills | output _bmad-output
-GRAPH    built (C:\Users\kinth\code\MuseScore\graphify-out\graph.json)
+GRAPH    built (C:\path\to\workspace\api-server\graphify-out\graph.json)
 RUNTIME  memory=sqlite (no service) model=installed
 ```
 
