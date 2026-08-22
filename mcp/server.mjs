@@ -26,6 +26,7 @@ import { verifyFact } from "../lib/verify.mjs";
 import { createTask, addEvent, setState, listTasks, resume, renderResume } from "../lib/tasks.mjs";
 import { loadGraph, hasGraph, findSymbols, sliceSymbol, callersOf, calleesOf,
          changedFiles, changedRanges, symbolsInRanges } from "../lib/graph.mjs";
+import { isIndexed, graphFromDb, searchSymbols } from "../lib/graphdb.mjs";
 
 // Machine-level home: runtimes, model, and data live here (shared by all
 // projects on the machine). The package itself only carries code.
@@ -145,6 +146,38 @@ const git = (repo, args) => {
   const r = spawnSync("git", ["-C", repo, ...args], { encoding: "utf8", windowsHide: true });
   return { ok: r.status === 0, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 };
+
+/**
+ * The graph for a repo, from the index when it has been imported and from the
+ * JSON document when it has not. Identical shape either way, so nothing
+ * downstream needs to know which it got.
+ */
+function graphFor(repo) {
+  if (isIndexed(repo)) {
+    const g = graphFromDb(repo);
+    if (g && g.nodes.size) return g;
+  }
+  return loadGraph(repo);
+}
+
+/**
+ * Pick the symbols a task is about. With the index and an embedding model this
+ * is a search by meaning — "where is authentication handled" reaches
+ * validateSession without sharing a word with it. Otherwise it falls back to
+ * matching names, which needs the caller to have used the right vocabulary.
+ */
+async function selectSymbols(repo, g, task, limit) {
+  if (g.indexed && embeddingsInstalled()) {
+    try {
+      const [qv] = (await embed(task, { query: true })) ?? [];
+      if (qv) {
+        const hits = searchSymbols(repo, task, { vec: qv, limit, similarity, fromBlob });
+        if (hits.length) return hits.map((h) => g.nodes.get(h.id) ?? h);
+      }
+    } catch { /* fall through to names */ }
+  }
+  return findSymbols(g, task, limit);
+}
 
 /** One line naming a symbol and its immediate neighbourhood in the graph. */
 function symbolHeader(g, n, sym, repo = null, cache = new Map()) {
@@ -683,9 +716,10 @@ Record what happens with task_note, and save durable facts with memory_save_fact
     case "code_context": {
       const repo = args.repo;
       if (!fs.existsSync(repo)) throw new Error(`Repo not found: ${repo}`);
-      if (!hasGraph(repo)) throw new Error(`No code graph in ${repo}. Build one with 'amalgam graph' (or graph_query mode=build).`);
-      const g = loadGraph(repo);
-      const found = findSymbols(g, args.task, Math.min(Math.max(args.max_symbols ?? 5, 1), 15));
+      if (!hasGraph(repo) && !isIndexed(repo)) throw new Error(`No code graph in ${repo}. Build one with 'amalgam graph' (or graph_query mode=build).`);
+      const g = graphFor(repo);
+      if (!g) throw new Error(`No code graph in ${repo}. Build one with 'amalgam graph'.`);
+      const found = await selectSymbols(repo, g, args.task, Math.min(Math.max(args.max_symbols ?? 5, 1), 15));
       if (!found.length) return `No symbol in the graph matches "${args.task}". Try naming a function, or fall back to a file read.`;
 
       const lines = Math.min(Math.max(args.lines ?? 14, 4), 60);
@@ -713,9 +747,10 @@ Record what happens with task_note, and save durable facts with memory_save_fact
     case "graph_impact": {
       const repo = args.repo;
       if (!fs.existsSync(repo)) throw new Error(`Repo not found: ${repo}`);
-      if (!hasGraph(repo)) throw new Error(`No code graph in ${repo}. Build one with 'amalgam graph'.`);
+      if (!hasGraph(repo) && !isIndexed(repo)) throw new Error(`No code graph in ${repo}. Build one with 'amalgam graph'.`);
       const rev = args.rev ?? "HEAD";
-      const g = loadGraph(repo);
+      const g = graphFor(repo);
+      if (!g) throw new Error(`No code graph in ${repo}. Build one with 'amalgam graph'.`);
       const ranges = changedRanges(repo, rev, git);
       if (ranges.size === 0) return `No changes against ${rev}.`;
 

@@ -2,7 +2,7 @@
   "name": "@papatemporal/amalgam",
   "version": "0.1.0",
   "private": true,
-  "description": "Local offload stack for frontier-model coding agents: portable PostgreSQL layered memory, llama.cpp caveman compression, graphify code graphs. Zero installs, zero admin, zero cloud.",
+  "description": "Local offload stack for frontier-model coding agents: SQLite layered memory with semantic recall, a code graph served as evidence packets, work items, and optional local-model digest. Zero installs, zero admin, zero cloud.",
   "type": "module",
   "bin": {
     "amalgam": "bin/amalgam.mjs"
@@ -16,6 +16,6 @@
   },
   "license": "MIT",
   "scripts": {
-    "test": "node tests/recall-eval.mjs && node tests/memory-eval.mjs && node tests/graph-eval.mjs && node tests/task-eval.mjs"
+    "test": "node tests/recall-eval.mjs && node tests/memory-eval.mjs && node tests/graph-eval.mjs && node tests/graphdb-eval.mjs && node tests/task-eval.mjs"
   }
 }

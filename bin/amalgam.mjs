@@ -24,6 +24,8 @@ import os from "node:os";
 import { ensureLlama, llamaHealthy, modelInstalled, LLAMA_PORT } from "../lib/services.mjs";
 import { open as openDb } from "../lib/db.mjs";
 import { verifyFact } from "../lib/verify.mjs";
+import { importGraph, indexStatus } from "../lib/graphdb.mjs";
+import { embed, toBlob, embeddingsInstalled } from "../lib/embed.mjs";
 import { createTask, addEvent, setState, listTasks, resume, renderResume } from "../lib/tasks.mjs";
 
 const PKG = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -647,6 +649,30 @@ function buildOneGraph(dir, { sql = false } = {}) {
   return true;
 }
 
+/**
+ * Fold a freshly built graph into the index beside memory.
+ *
+ * Done here rather than on demand because it is the moment the graph is known
+ * to be current, and because embedding a few hundred symbols once is cheaper
+ * than every query paying to parse the document again. Failure is reported and
+ * ignored: the JSON remains perfectly usable on its own.
+ */
+async function indexOneGraph(dir) {
+  try {
+    const withVectors = embeddingsInstalled();
+    const res = await importGraph(dir, {
+      embed: withVectors ? async (texts) => (await embed(texts))?.map(toBlob) : null,
+    });
+    if (!res.ok) return console.log(`  index skipped: ${res.error}`);
+    const vec = withVectors
+      ? `${res.embedded} embedded, ${res.reused} vectors reused`
+      : "no embeddings installed — name search only";
+    console.log(`  indexed -> ${res.symbols} symbols, ${res.edges} edges (${vec}${res.removed ? `, ${res.removed} gone` : ""})`);
+  } catch (e) {
+    console.log(`  index skipped: ${e.message}`);
+  }
+}
+
 function reportStaleness(dir, label = dir) {
   const s = graphStaleness(dir);
   if (!s) console.log(`  ${label}: no graph — build with \`amalgam graph\``);
@@ -660,7 +686,7 @@ function reportStaleness(dir, label = dir) {
  * turn, each keeping its own graph. Naming a directory explicitly always means
  * exactly that directory.
  */
-function cmdGraph(args) {
+async function cmdGraph(args) {
   const dirIdx = args.indexOf("--directory");
   const explicit = dirIdx >= 0 ? args[dirIdx + 1] : args.find((a) => !a.startsWith("--"));
   const check = args.includes("--check");
@@ -677,6 +703,7 @@ function cmdGraph(args) {
     }
     if (check) return reportStaleness(target, path.basename(target));
     if (!buildOneGraph(target, { sql })) process.exit(1);
+    await indexOneGraph(target);
     return;
   }
 
@@ -687,6 +714,7 @@ function cmdGraph(args) {
   if (!isWorkspace) {
     if (check) return reportStaleness(cwd, path.basename(cwd));
     if (!buildOneGraph(cwd, { sql })) process.exit(1);
+    await indexOneGraph(cwd);
     return;
   }
 
@@ -706,7 +734,10 @@ function cmdGraph(args) {
   console.log(`workspace ${cwd} — graphing ${targets.length} service(s)`);
   if (skipped.length) console.log(`skipping (not git repos): ${skipped.map((s) => s.name).join(", ")}   include with --all`);
   let failures = 0;
-  for (const s of targets) if (!buildOneGraph(s.path, { sql })) failures++;
+  for (const s of targets) {
+    if (!buildOneGraph(s.path, { sql })) { failures++; continue; }
+    await indexOneGraph(s.path);
+  }
   console.log(`\n${targets.length - failures}/${targets.length} graph(s) built. Query them with the graph_query MCP tool.`);
   if (failures) process.exit(1);
 }
@@ -1423,7 +1454,7 @@ switch (cmd) {
   case "stream": cmdStream(rest); break;
   case "brief": cmdBrief(rest); break;
   case "globalize": cmdGlobalize(rest); break;
-  case "graph": cmdGraph(rest); break;
+  case "graph": await cmdGraph(rest); break;
   case "shim": cmdShim(rest); break;
   case "version": case "--version": case "-v": cmdVersion(); break;
   case "update": await cmdUpdate(rest); break;

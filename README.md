@@ -382,6 +382,57 @@ does. `--builds-only` reclaims space without removing worktrees;
 | `code_context` | — | Evidence packet for a task: the symbols that matter, their callers, and their current source — instead of whole files |
 | `graph_impact` | — | Blast radius of a diff: which symbols changed and everything that calls them |
 
+### The graph as an index, not a document
+
+`amalgam graph` builds the graph and then imports it into the same SQLite file
+memory lives in. graphify stays the extractor — this project has no business
+owning a tree-sitter pipeline — but a JSON document is a poor query surface: it
+is parsed in full for every question, it can only be searched by the words
+already written in it, and there is nowhere to keep anything learned about it.
+
+Indexed, each symbol carries its signature **and the comment block above it**,
+embedded with the same local model memory uses. That is what lets a question
+find code phrased differently from it:
+
+```text
+"guard against empty passwords before requests are routed"
+   -> validateSession()      (shares not one word with the query)
+   name-only search          -> nothing
+```
+
+Re-importing keeps the vectors of symbols that did not change, so a rebuild
+embeds only what moved — on this repo, a no-op rebuild re-embeds nothing at
+all. Ranking is cosine first, then two mild corrections: a question about
+behaviour is usually answered by something callable, and by something other
+code actually reaches.
+
+Speed is not the reason to do this. At 222 KB the document parses in 3.7 ms
+against the index's 2.5 ms — worth having at scale, not worth mentioning at
+this size. The reasons are the search by meaning, the incremental embedding,
+and having one store rather than two.
+
+### Edges you can believe
+
+A call graph built from names cannot see scope. `resolve` inside
+`new Promise((resolve, reject) => …)` is a parameter, and `x.parse()` is
+someone else's method, but both look exactly like calls to a same-named export
+elsewhere in the project. So edges get the same treatment as symbol text: the
+graph proposes, the working tree decides. Each edge records its call site, and
+that line is read before the edge is reported —
+
+| verdict | meaning |
+|---|---|
+| confirmed | a bare call to the name sits on the recorded line |
+| moved | not there, but the call exists elsewhere in the file — the graph is behind, the relationship is real |
+| shadowed | a parameter, a local binding, or a method on something else — a false positive |
+| absent | no such call anywhere in the file — a dead edge |
+
+Shadowed and absent edges are dropped rather than shown with a caveat: a caller
+list is read as a list of places to go and look, so a wrong entry costs exactly
+the wasted read this is trying to avoid. On this repo that removes 4.4% of
+caller edges. It also means a stale graph degrades honestly instead of
+confidently pointing at code that has moved.
+
 ### Keeping a memory honest
 
 A store that answers quickly and confidently with last month's truth is worse

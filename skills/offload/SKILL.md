@@ -70,7 +70,10 @@ them and their expensive build directories alone.
 ## During work
 
 - **Evidence before files.** About to change existing code? Call
-  `code_context` with the task in plain language. It returns the symbols
+  `code_context` with the task in plain language — describe the intent,
+  not the identifier: with an indexed graph it searches by meaning, so
+  "where do we reject bad credentials" finds the function even when the
+  name shares no words with the question. It returns the symbols
   that bear on it, who calls them, what they call, and their current
   source read from disk — a few hundred tokens where the files around
   them are a few thousand. The graph chooses the lines; the working tree
