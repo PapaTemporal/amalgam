@@ -23,6 +23,7 @@ import os from "node:os";
 
 import { ensureLlama, llamaHealthy, modelInstalled, LLAMA_PORT } from "../lib/services.mjs";
 import { open as openDb } from "../lib/db.mjs";
+import { verifyFact } from "../lib/verify.mjs";
 
 const PKG = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HOME = process.env.AMALGAM_HOME ?? path.join(os.homedir(), ".amalgam");
@@ -1255,6 +1256,61 @@ When you have judged the result:  amalgam stream done ${name} --repo ${repo}`);
   }
 }
 
+// ================================================================= memory
+/**
+ * Re-check stored facts against the machine they describe.
+ *
+ * Memory is the one part of this stack that gets more valuable and less
+ * trustworthy over time. Nothing here judges whether a fact is true — only
+ * whether the paths it names still exist, which is free and catches the drift
+ * that actually happens: a directory moved, a runtime removed, a repo renamed.
+ * Recall shows the verdict beside the fact so a stale memory is read with
+ * suspicion rather than acted on.
+ */
+function cmdMemory(args) {
+  const sub = args[0] ?? "verify";
+  const d = openDb();
+
+  if (sub === "verify") {
+    const rows = d.prepare(
+      `SELECT id, context, content FROM l1_facts WHERE superseded_by IS NULL ORDER BY id`).all();
+    const upd = d.prepare(
+      `UPDATE l1_facts SET verify_state = ?, verify_note = ?, verified_at = datetime('now') WHERE id = ?`);
+    const tally = { ok: 0, stale: 0, unknown: 0 };
+    const stale = [];
+    for (const r of rows) {
+      const v = verifyFact(r.content);
+      upd.run(v.state, v.note, r.id);
+      tally[v.state]++;
+      if (v.state === "stale") stale.push({ id: r.id, context: r.context, note: v.note });
+    }
+    console.log(`checked ${rows.length} live fact(s): ${tally.ok} ok, ${tally.stale} stale, ${tally.unknown} nothing to check`);
+    for (const s of stale) console.log(`  L1:${s.id}${s.context ? ` @${s.context}` : ""}  ${s.note}`);
+    if (stale.length) console.log(`
+Stale means a path named in the fact is gone. Fix the fact, or save a corrected one and supersede this id.`);
+    return;
+  }
+
+  if (sub === "stale" || sub === "list") {
+    const where = sub === "stale" ? "verify_state = 'stale' AND superseded_by IS NULL" : "superseded_by IS NULL";
+    for (const r of d.prepare(`SELECT id, kind, context, verify_state, content FROM l1_facts WHERE ${where} ORDER BY id`).all()) {
+      console.log(`L1:${r.id} [${r.kind}${r.context ? ` @${r.context}` : ""}${r.verify_state === "stale" ? " STALE" : ""}] ${r.content.slice(0, 110)}`);
+    }
+    return;
+  }
+
+  if (sub === "history") {
+    const rows = d.prepare(
+      `SELECT id, superseded_by, superseded_at, content FROM l1_facts
+        WHERE superseded_by IS NOT NULL ORDER BY superseded_at DESC`).all();
+    if (!rows.length) return console.log("nothing superseded yet");
+    for (const r of rows) console.log(`L1:${r.id} -> L1:${r.superseded_by} (${r.superseded_at})  ${r.content.slice(0, 90)}`);
+    return;
+  }
+
+  console.log("usage: amalgam memory [verify|list|stale|history]");
+}
+
 // ---------------------------------------------------------------- dispatch
 const [cmd, ...rest] = process.argv.slice(2);
 switch (cmd) {
@@ -1263,6 +1319,7 @@ switch (cmd) {
   case "stop": cmdStop(); break;
   case "status": await cmdStatus(); break;
   case "stats": cmdStats(); break;
+  case "memory": cmdMemory(rest); break;
   case "wire": cmdWire(rest); break;
   case "stream": cmdStream(rest); break;
   case "brief": cmdBrief(rest); break;
@@ -1297,6 +1354,9 @@ Usage:
   amalgam version                   what is deployed vs. what this source has
   amalgam update                    pull, re-deploy, and refresh every wired copy
   amalgam stats                     measured tool usage — is any of this earning its keep?
+  amalgam memory [sub]              verify | list | stale | history — re-check
+                                    stored facts against this machine and show
+                                    what drifted or was superseded
   amalgam wire [--claude|--copilot] wire the current project (default: both)
   amalgam wire --user               wire once for EVERY project on this machine
                                     (skills + hook + MCP at user scope)

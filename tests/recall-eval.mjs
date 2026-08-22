@@ -21,9 +21,11 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 
-const HOME = process.env.AMALGAM_HOME ?? path.join(os.homedir(), ".amalgam");
-const SERVER = path.join(HOME, "mcp", "server.mjs");
+// Test the code in this checkout, not whatever happens to be deployed.
+const PKG = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const SERVER = path.join(PKG, "mcp", "server.mjs");
 
 // A disposable database for this run only. The real one is never opened.
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "amalgam-eval-"));

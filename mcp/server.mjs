@@ -22,6 +22,7 @@ import os from "node:os";
 import { ensureLlama, modelInstalled } from "../lib/services.mjs";
 import { open as openDb, ftsQuery, logUsage, DB_PATH } from "../lib/db.mjs";
 import { embed, similarity, toBlob, fromBlob, embeddingsInstalled } from "../lib/embed.mjs";
+import { verifyFact } from "../lib/verify.mjs";
 
 // Machine-level home: runtimes, model, and data live here (shared by all
 // projects on the machine). The package itself only carries code.
@@ -56,16 +57,45 @@ async function backfillEmbeddings(d, batch = 32) {
   return missing.length;
 }
 
+/**
+ * Render one fact for recall. A fact whose last machine check failed is still
+ * shown — it may be the only thing that answers the query — but it is shown
+ * WITH that fact attached, so the reader discounts it instead of acting on it.
+ */
+function factLine(r) {
+  const stale = r.verify_state === "stale" ? ` !stale: ${r.verify_note}` : "";
+  return `[L1:${r.id}] (${r.kind}${r.context ? ` @${r.context}` : ""}${stale}) ${r.content}`;
+}
+
+/**
+ * Facts close enough to a new one that they may be the thing it replaces.
+ * Cheap: the vectors are already stored, so this is a dot product per row and
+ * no model call. The threshold is deliberately high — a false candidate costs
+ * the agent a moment's attention, and this is meant to be quiet.
+ */
+function supersedeCandidates(d, newId, vec, threshold = 0.86, max = 3) {
+  if (!vec) return [];
+  const out = [];
+  for (const r of d.prepare(
+    `SELECT id, content, embedding FROM l1_facts
+      WHERE embedding IS NOT NULL AND superseded_by IS NULL AND id != ?`).all(newId)) {
+    const score = similarity(vec, fromBlob(r.embedding));
+    if (score >= threshold) out.push({ id: r.id, score, content: r.content });
+  }
+  return out.sort((a, b) => b.score - a.score).slice(0, max);
+}
+
 /** Embed one record at write time; silently skipped when unavailable. */
 async function embedRow(table, id, text) {
-  if (!embeddingsInstalled()) return;
+  if (!embeddingsInstalled()) return null;
   try {
     const [v] = (await embed(text)) ?? [];
-    if (!v) return;
+    if (!v) return null;
     const d = db();
     if (table === "l1") d.prepare(`UPDATE l1_facts SET embedding = ? WHERE id = ?`).run(toBlob(v), id);
     else d.prepare(`UPDATE l2_scenarios SET embedding = ? WHERE path = ?`).run(toBlob(v), id);
-  } catch {}
+    return v;
+  } catch { return null; }
 }
 
 // ------------------------------------------------------------- llama bridge
@@ -137,8 +167,22 @@ const TOOLS = [
         query: { type: "string", description: "Plain-language search terms" },
         limit: { type: "integer", default: 8, minimum: 1, maximum: 50 },
         include_raw: { type: "boolean", default: false, description: "Also search raw L0 conversation log" },
+        include_superseded: { type: "boolean", default: false, description: "Also return facts that a later fact replaced (history; off by default)" },
       },
       required: ["query"],
+    },
+  },
+  {
+    name: "memory_supersede",
+    description:
+      "Mark older facts as replaced by a newer one. Use when a fact you just saved corrects or updates something already stored — the old rows stay as history but stop appearing in recall, so the mistake and its correction are not both paid for in context. memory_save_fact reports likely candidates.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        new_id: { type: "integer", description: "The fact that replaces the others" },
+        old_ids: { type: "array", items: { type: "integer" }, description: "Fact ids now superseded" },
+      },
+      required: ["new_id", "old_ids"],
     },
   },
   {
@@ -261,16 +305,20 @@ async function handleTool(name, args) {
     case "memory_recall": {
       const limit = Math.min(Math.max(args.limit ?? 8, 1), 50);
       const d = db();
+      // A fact that a later fact replaced is history, not an answer. Paying
+      // context for both the mistake and its correction is the expensive way
+      // to be right, and ranking can put them in either order.
+      const supersededFilter = args.include_superseded ? "" : " AND superseded_by IS NULL";
 
       // --- keyword leg (BM25) ---
       const q = ftsQuery(args.query);
       const keyword = [];
       if (q) {
         for (const r of d.prepare(
-          `SELECT f.id, f.kind, f.context, f.content, bm25(l1_fts) AS rank
+          `SELECT f.id, f.kind, f.context, f.content, f.verify_state, f.verify_note, bm25(l1_fts) AS rank
              FROM l1_fts JOIN l1_facts f ON f.id = l1_fts.rowid
-            WHERE l1_fts MATCH ? ORDER BY rank LIMIT ?`).all(q, limit * 2)) {
-          keyword.push({ key: `L1:${r.id}`, line: `[L1:${r.id}] (${r.kind}${r.context ? ` @${r.context}` : ""}) ${r.content}` });
+            WHERE l1_fts MATCH ?${supersededFilter.replace(/superseded_by/, 'f.superseded_by')} ORDER BY rank LIMIT ?`).all(q, limit * 2)) {
+          keyword.push({ key: `L1:${r.id}`, line: factLine(r) });
         }
         for (const r of d.prepare(
           `SELECT path, summary, substr(content, 1, 1200) AS content, bm25(l2_fts) AS rank
@@ -298,11 +346,12 @@ async function handleTool(name, args) {
             semanticUsed = true;
             const scored = [];
             for (const r of d.prepare(
-              `SELECT id, kind, context, content, embedding FROM l1_facts WHERE embedding IS NOT NULL`).all()) {
+              `SELECT id, kind, context, content, verify_state, verify_note, embedding
+                 FROM l1_facts WHERE embedding IS NOT NULL${supersededFilter}`).all()) {
               scored.push({
                 score: similarity(qv, fromBlob(r.embedding)),
                 key: `L1:${r.id}`,
-                line: `[L1:${r.id}] (${r.kind}${r.context ? ` @${r.context}` : ""}) ${r.content}`,
+                line: factLine(r),
               });
             }
             for (const r of d.prepare(
@@ -346,11 +395,37 @@ async function handleTool(name, args) {
       return semanticUsed ? out : out + "\n\n(keyword search only — install semantic recall with `amalgam install --with-embeddings`)";
     }
     case "memory_save_fact": {
-      const info = db().prepare(
-        `INSERT INTO l1_facts (kind, content, context, priority) VALUES (?, ?, ?, ?)`
-      ).run(args.kind ?? "fact", args.content, args.context ?? "", args.priority ?? 50);
-      await embedRow("l1", info.lastInsertRowid, `${args.content} ${args.context ?? ""}`);
-      return `Saved L1 fact id=${info.lastInsertRowid}`;
+      const d = db();
+      // Check the fact's own anchors as it is written. Catching a dead path
+      // now costs nothing; discovering it mid-task months later is expensive.
+      const v = verifyFact(args.content);
+      const info = d.prepare(
+        `INSERT INTO l1_facts (kind, content, context, priority, verify_state, verify_note, verified_at)
+         VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`
+      ).run(args.kind ?? "fact", args.content, args.context ?? "", args.priority ?? 50, v.state, v.note);
+      const id = Number(info.lastInsertRowid);
+      const vec = await embedRow("l1", id, `${args.content} ${args.context ?? ""}`);
+
+      const out = [`Saved L1 fact id=${id}`];
+      if (v.state === "stale") out.push(`Careful: ${v.note} — this fact names a path that does not exist here.`);
+      const near = supersedeCandidates(d, id, vec);
+      if (near.length) {
+        out.push(`Close to existing memories, which this may replace:`);
+        for (const c of near) out.push(`  L1:${c.id} (${c.score.toFixed(2)}) ${c.content.slice(0, 90)}${c.content.length > 90 ? "…" : ""}`);
+        out.push(`If it does, call memory_supersede { new_id: ${id}, old_ids: [...] } so recall stops returning both.`);
+      }
+      return out.join("\n");
+    }
+    case "memory_supersede": {
+      const d = db();
+      const newId = Number(args.new_id);
+      if (!d.prepare(`SELECT 1 FROM l1_facts WHERE id = ?`).get(newId)) return `No fact id=${newId}.`;
+      const stmt = d.prepare(
+        `UPDATE l1_facts SET superseded_by = ?, superseded_at = datetime('now')
+          WHERE id = ? AND id != ? AND superseded_by IS NULL`);
+      let n = 0;
+      for (const raw of args.old_ids ?? []) n += Number(stmt.run(newId, Number(raw), newId).changes);
+      return `Superseded ${n} fact(s) by L1:${newId}. They remain as history; recall no longer returns them.`;
     }
     case "memory_log": {
       const stmt = db().prepare(`INSERT INTO l0_log (session_id, role, content) VALUES (?, ?, ?)`);
