@@ -369,13 +369,44 @@ does. `--builds-only` reclaims space without removing worktrees;
 | Tool | Layer | Purpose |
 |---|---|---|
 | `memory_recall` | L1+L2 (+L0) | Ranked full-text search; primary context loader |
-| `memory_save_fact` | L1 | One distilled fact/preference/decision per call |
+| `memory_save_fact` | L1 | One distilled fact/preference/decision per call; checks the fact's paths and reports likely duplicates |
+| `memory_supersede` | L1 | Mark older facts replaced by a newer one — history kept, recall cleaned |
 | `memory_log` | L0 | Verbatim conversation audit trail |
 | `memory_context_write/read/list` | L2 | Durable per-project scenario docs |
 | `memory_persona_read/write` | L3 | Stable user profile |
 | `digest` | — | Read a large file or command output and return only a dense digest — the raw text never enters the agent's context (needs the optional model) |
 | `caveman_compress/expand` | — | Dense↔readable translation (needs the optional model) |
 | `graph_query` | — | graphify explain/path/query/build per repo |
+| `code_context` | — | Evidence packet for a task: the symbols that matter, their callers, and their current source — instead of whole files |
+| `graph_impact` | — | Blast radius of a diff: which symbols changed and everything that calls them |
+
+### Evidence instead of files
+
+An agent that needs to change existing code usually reads the files around it,
+which is the most expensive possible way to learn two things: where a symbol is
+defined, and what depends on it. The graph already knows both.
+
+So `code_context` splits the job. The graph decides **which** lines matter; the
+working tree supplies **what** they say. That division is what makes a stale
+graph tolerable: a symbol that moved is found by name, a symbol that was
+deleted is reported missing rather than quoted from a stale snapshot, and the
+answer says how far behind the graph is. Nothing is ever quoted from the index
+itself.
+
+Measured on this repository, three ordinary "change existing code" tasks:
+
+```text
+task                                             packet   files it replaces
+change how supersede candidates are scored        2,786   34,676   (-92.0%)
+fix how fact anchors are verified                 2,876    3,385   (-15.0%)
+adjust recall ranking across both legs            3,052   45,540   (-93.3%)
+                                                  8,714   83,601   (-89.6%)
+```
+
+The middle row is the honest one: against a small file a packet saves almost
+nothing, and reading the file is the better move. The win scales with the size
+of what you would otherwise have read, which is why the tool reports what it
+selected rather than pretending to be right every time.
 
 ### Where the local model actually helps
 

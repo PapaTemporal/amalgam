@@ -13,7 +13,7 @@
 // Must come first — see lib/preflight.mjs.
 import "../lib/preflight.mjs";
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
@@ -23,6 +23,8 @@ import { ensureLlama, modelInstalled } from "../lib/services.mjs";
 import { open as openDb, ftsQuery, logUsage, DB_PATH } from "../lib/db.mjs";
 import { embed, similarity, toBlob, fromBlob, embeddingsInstalled } from "../lib/embed.mjs";
 import { verifyFact } from "../lib/verify.mjs";
+import { loadGraph, hasGraph, findSymbols, sliceSymbol, callersOf, calleesOf,
+         changedFiles, changedRanges, symbolsInRanges } from "../lib/graph.mjs";
 
 // Machine-level home: runtimes, model, and data live here (shared by all
 // projects on the machine). The package itself only carries code.
@@ -136,6 +138,34 @@ const COMPRESS_SYS =
   "You compress English into dense telegraphic 'caveman' text. Remove articles, filler, pleasantries, hedging, and predictable grammar. Keep EVERY fact, number, name, decision, and constraint. Code, file paths, commands, URLs, and error messages must stay byte-for-byte exact. Output ONLY the compressed text, nothing else.";
 const EXPAND_SYS =
   "You expand dense telegraphic 'caveman' text into clear, natural English prose. Do not add information, opinions, or filler. Keep code, file paths, commands, URLs, and error messages byte-for-byte exact. Output ONLY the expanded text, nothing else.";
+
+// ------------------------------------------------------------- code evidence
+const git = (repo, args) => {
+  const r = spawnSync("git", ["-C", repo, ...args], { encoding: "utf8", windowsHide: true });
+  return { ok: r.status === 0, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+};
+
+/** One line naming a symbol and its immediate neighbourhood in the graph. */
+function symbolHeader(g, n, sym) {
+  const inb = callersOf(g, n.id).map((c) => c.name);
+  const out = calleesOf(g, n.id).map((c) => c.name);
+  const bits = [`${sym.file}:${sym.line ?? "?"}  ${n.label}`];
+  if (inb.length) bits.push(`called by: ${inb.slice(0, 6).join(", ")}${inb.length > 6 ? ` (+${inb.length - 6})` : ""}`);
+  if (out.length) bits.push(`calls: ${out.slice(0, 6).join(", ")}${out.length > 6 ? ` (+${out.length - 6})` : ""}`);
+  return bits.join("  |  ");
+}
+
+/**
+ * How far behind the working tree the graph has fallen. Reported rather than
+ * hidden: selection quality degrades with staleness even though the quoted
+ * text is always current, and an agent should know which it is looking at.
+ */
+function graphDrift(repo, g) {
+  if (!g.builtAt) return "";
+  const changed = changedFiles(repo, g.builtAt, git);
+  if (!changed || changed.length === 0) return "";
+  return `graph built at ${String(g.builtAt).slice(0, 8)}; ${changed.length} file(s) changed since, so selection may miss recent symbols`;
+}
 
 // ------------------------------------------------------------- graphify bridge
 function graphify(repo, cliArgs) {
@@ -293,6 +323,35 @@ const TOOLS = [
         b: { type: "string", description: "path mode only: to-symbol" },
       },
       required: ["repo", "mode"],
+    },
+  },
+  {
+    name: "code_context",
+    description:
+      "Assemble an evidence packet for a task from a repo's code graph: the symbols that matter, who calls them, what they call, and their CURRENT source lines read from disk. Use this INSTEAD of reading whole files when you need to understand or change existing code — it returns the few hundred tokens that bear on the task rather than the few thousand that surround them. Requires a built graph (amalgam graph).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: { type: "string", description: "Absolute path to the repo" },
+        task: { type: "string", description: "Plain-language description of what you are about to do, or a symbol name" },
+        max_symbols: { type: "integer", default: 5, minimum: 1, maximum: 15 },
+        lines: { type: "integer", default: 14, minimum: 4, maximum: 60, description: "Source lines per symbol" },
+      },
+      required: ["repo", "task"],
+    },
+  },
+  {
+    name: "graph_impact",
+    description:
+      "Blast radius of a change: which symbols the diff actually touched, and everything that calls them, from the code graph. Use before reviewing or extending a change instead of grepping for callers. Defaults to uncommitted work; pass a revision to compare against something else.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: { type: "string", description: "Absolute path to the repo" },
+        rev: { type: "string", default: "HEAD", description: "Revision to diff against (default HEAD = uncommitted changes)" },
+        max_symbols: { type: "integer", default: 20, minimum: 1, maximum: 100 },
+      },
+      required: ["repo"],
     },
   },
 ];
@@ -534,6 +593,67 @@ async function handleTool(name, args) {
         : args.mode === "path" ? await graphify(repo, ["path", args.a, args.b])
           : await graphify(repo, ["query", args.a]);
       logUsage("graph_query", String(args.a ?? "").length, out.length);
+      return out;
+    }
+    case "code_context": {
+      const repo = args.repo;
+      if (!fs.existsSync(repo)) throw new Error(`Repo not found: ${repo}`);
+      if (!hasGraph(repo)) throw new Error(`No code graph in ${repo}. Build one with 'amalgam graph' (or graph_query mode=build).`);
+      const g = loadGraph(repo);
+      const found = findSymbols(g, args.task, Math.min(Math.max(args.max_symbols ?? 5, 1), 15));
+      if (!found.length) return `No symbol in the graph matches "${args.task}". Try naming a function, or fall back to a file read.`;
+
+      const lines = Math.min(Math.max(args.lines ?? 14, 4), 60);
+      const parts = [];
+      const drift = graphDrift(repo, g);
+      if (drift) parts.push(`(${drift})`);
+      for (const n of found) {
+        const sym = sliceSymbol(repo, n, lines);
+        parts.push(`--- ${symbolHeader(g, n, sym)}`);
+        if (sym.missing) parts.push(`    [${sym.missing} — the graph is behind the tree here]`);
+        else {
+          if (sym.moved) parts.push(`    [moved since the graph was built; located by name]`);
+          parts.push(sym.text);
+        }
+      }
+      const out = parts.join("\n");
+      logUsage("code_context", String(args.task).length, out.length);
+      return out;
+    }
+    case "graph_impact": {
+      const repo = args.repo;
+      if (!fs.existsSync(repo)) throw new Error(`Repo not found: ${repo}`);
+      if (!hasGraph(repo)) throw new Error(`No code graph in ${repo}. Build one with 'amalgam graph'.`);
+      const rev = args.rev ?? "HEAD";
+      const g = loadGraph(repo);
+      const ranges = changedRanges(repo, rev, git);
+      if (ranges.size === 0) return `No changes against ${rev}.`;
+
+      // Most-depended-on first, and capped: a large diff otherwise returns a
+      // wall of symbols, which is the file-reading problem in another costume.
+      const all = symbolsInRanges(g, ranges)
+        .sort((a, b) => (g.callers.get(b.id) ?? []).length - (g.callers.get(a.id) ?? []).length);
+      const cap = Math.min(Math.max(args.max_symbols ?? 20, 1), 100);
+      const touched = all.slice(0, cap);
+      const files = [...ranges.keys()];
+      const parts = [`changed vs ${rev}: ${files.length} file(s), ${all.length} symbol(s) in the graph`
+        + (all.length > touched.length ? ` — showing the ${touched.length} most depended on` : "")];
+
+      // Files the graph knows nothing about are the honest gap in this answer:
+      // new files are not in a graph built before they existed.
+      const known = new Set([...g.nodes.values()].map((n) => n.file.split("\\").join("/")));
+      const unknown = files.filter((f) => !known.has(f));
+      if (unknown.length) parts.push(`not in the graph (new or unindexed): ${unknown.join(", ")}`);
+
+      for (const n of touched) {
+        const inb = callersOf(g, n.id);
+        parts.push(`--- ${n.file}:${n.line} ${n.label}`);
+        parts.push(inb.length
+          ? `    called by: ${inb.map((c) => `${c.name} (${c.file}:${c.line})`).join(", ")}`
+          : `    no callers in the graph — entry point, or reached dynamically`);
+      }
+      const out = parts.join("\n");
+      logUsage("graph_impact", rev.length, out.length);
       return out;
     }
     default:

@@ -69,10 +69,21 @@ them and their expensive build directories alone.
 
 ## During work
 
+- **Evidence before files.** About to change existing code? Call
+  `code_context` with the task in plain language. It returns the symbols
+  that bear on it, who calls them, what they call, and their current
+  source read from disk — a few hundred tokens where the files around
+  them are a few thousand. The graph chooses the lines; the working tree
+  supplies them, so a slightly stale graph costs precision, never
+  correctness. It says so when it is behind.
+- **Blast radius before review.** `graph_impact` maps a diff to the
+  symbols it actually touched and everything that calls them. Use it
+  instead of grepping for callers when reviewing or extending a change.
 - **Graph before grep.** For "what calls X", "how do A and B connect",
-  "explain symbol Y" in a repo with a built graph, use `graph_query`
-  (mode explain/path/query) instead of reading files. Fall back to
-  Grep/Read only when the graph lacks the answer.
+  "explain symbol Y", use `graph_query` (mode explain/path/query). Fall
+  back to Grep/Read only when the graph lacks the answer — and prefer a
+  file read outright for a file small enough that a packet would not
+  save anything.
 - **Compress bulky payloads.** Before storing long notes, or when you must
   carry a verbose document forward, run `caveman_compress` locally and keep
   only the dense version.
@@ -83,6 +94,13 @@ them and their expensive build directories alone.
 
 - `memory_save_fact` — one call per durable fact/preference/decision/constraint
   learned this session (tag `context` with the project, e.g. 'api-server').
+  It warns when the fact names a path that does not exist, and reports any
+  stored fact close enough to be the thing it replaces.
+- `memory_supersede` — when a fact you just saved corrects an older one, say
+  so. The old row stays as history but leaves recall, so the mistake and its
+  correction are not both paid for on every future query. Recall shows
+  `!stale` beside a fact whose paths have since disappeared; treat that as a
+  reason to re-check before acting, and supersede it once you know better.
 - `memory_context_write` — update the project's scenario doc if the working
   state changed (current plan, build quirks, decisions).
 - `memory_persona_write` — only when stable user preferences changed; read,
