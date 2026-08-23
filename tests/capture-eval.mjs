@@ -21,9 +21,10 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "amalgam-cap-"));
 process.env.AMALGAM_DB = path.join(TMP, "memory.db");
 
 const { readTranscript, logTurns, savePending, listPending, countPending,
-        acceptPending, rejectPending, proposeFacts, redact, pruneRaw, forgetRaw,
+        acceptPending, rejectPending, supersede, proposeFacts, redact, pruneRaw, forgetRaw,
         captureEnabled } = await import("../lib/capture.mjs");
 const { open, close } = await import("../lib/db.mjs");
+const { embed, toBlob, fromBlob, similarity, embeddingsInstalled } = await import("../lib/embed.mjs");
 const { verifyFact } = await import("../lib/verify.mjs");
 const { modelInstalled } = await import("../lib/services.mjs");
 
@@ -74,13 +75,13 @@ const factsBefore = open().prepare(`SELECT count(*) AS n FROM l1_facts`).get().n
 check("and are not in memory yet", factsBefore === 0, `${factsBefore} facts stored`);
 
 const pending = listPending();
-const accepted = acceptPending([pending[0].id], { verifyFact });
+const accepted = await acceptPending([pending[0].id], { verifyFact });
 check("accepting writes one fact", accepted.length === 1 && accepted[0].state === "unknown",
   `L1:${accepted[0]?.fact} verify=${accepted[0]?.state}`);
 
 // The second proposal names a path that does not exist, so it must arrive
 // already flagged rather than quietly believed.
-const accepted2 = acceptPending([pending[1].id], { verifyFact });
+const accepted2 = await acceptPending([pending[1].id], { verifyFact });
 check("a proposal naming a dead path arrives flagged", accepted2[0]?.state === "stale",
   `verify=${accepted2[0]?.state}`);
 
@@ -149,6 +150,36 @@ process.env.AMALGAM_CAPTURE = "off";
 check("capture can be disabled", !captureEnabled() && logTurns(many, "disabled") === 0,
   "AMALGAM_CAPTURE=off stores nothing");
 delete process.env.AMALGAM_CAPTURE;
+
+// --- accepting goes through the same door as any other write ---------------
+// A proposal is likelier than most to restate something already stored, since
+// it was distilled from a session that was probably discussing what is already
+// known. Accepting one without the duplicate check is the fastest way to end
+// up with four phrasings of one fact.
+if (!embeddingsInstalled()) {
+  skip("an accepted proposal is checked for duplicates", "no embedding model installed");
+} else {
+  const vectors = { embed, toBlob, similarity, fromBlob };
+  savePending([{ kind: "fact", content: "Deployment runs from the pinned release branch and the checklist is followed in order.", context: "dupes" }], "s3");
+  const first = await acceptPending(listPending().map((r) => r.id), { verifyFact, ...vectors });
+  check("an accepted proposal gets a vector immediately",
+    !!open().prepare(`SELECT embedding FROM l1_facts WHERE id = ?`).get(first[0].fact).embedding,
+    "searchable without waiting for a backfill");
+
+  savePending([{ kind: "fact", content: "Deployments run off the pinned release branch, following the checklist in order.", context: "dupes" }], "s4");
+  const second = await acceptPending(listPending().map((r) => r.id), { verifyFact, ...vectors });
+  check("a restatement of a stored fact is reported on accept",
+    second[0].near.some((n) => n.id === first[0].fact),
+    second[0].near.map((n) => `L1:${n.id} ${n.score.toFixed(2)}`).join(", ") || "(nothing close)");
+  check("but nothing is superseded without being told",
+    open().prepare(`SELECT superseded_by FROM l1_facts WHERE id = ?`).get(first[0].fact).superseded_by === null,
+    "the store never decides on its own what replaces what");
+
+  const n = supersede(second[0].fact, [first[0].fact]);
+  check("supersede marks the older one", n === 1
+    && open().prepare(`SELECT superseded_by FROM l1_facts WHERE id = ?`).get(first[0].fact).superseded_by === second[0].fact,
+    `${n} fact(s) superseded`);
+}
 
 // --- distillation, when a model is present ---------------------------------
 if (!modelInstalled()) {

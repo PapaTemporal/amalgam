@@ -39,9 +39,10 @@ import { git, readStreams, writeStreams, streamKey, inspectStream, classify,
          buildDirs, dirSize, human, BUILD_DIR_RE, plan as planGc, apply as applyGc,
          STREAMS_DB } from "../lib/streams.mjs";
 import { importGraph, indexStatus } from "../lib/graphdb.mjs";
-import { listPending, countPending, acceptPending, rejectPending,
+import { listPending, countPending, acceptPending, rejectPending, supersede,
          pruneRaw, forgetRaw, RAW_DAYS, RAW_MAX_ROWS } from "../lib/capture.mjs";
-import { embed, toBlob, embeddingsInstalled } from "../lib/embed.mjs";
+import { embed, toBlob, fromBlob as vecFromBlob,
+         similarity as vecSimilarity, embeddingsInstalled } from "../lib/embed.mjs";
 import { createTask, addEvent, setState, listTasks, resume, renderResume } from "../lib/tasks.mjs";
 
 const PKG = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -1241,7 +1242,7 @@ Done: ${totals.removed} worktree(s) removed, ${totals.cleaned} build dir set(s) 
  * Recall shows the verdict beside the fact so a stale memory is read with
  * suspicion rather than acted on.
  */
-function cmdMemory(args) {
+async function cmdMemory(args) {
   const sub = args[0] ?? "verify";
   const d = openDb();
 
@@ -1285,8 +1286,19 @@ accept with: amalgam memory accept ${rows[0].id}${rows.length > 1 ? " <id>..." :
       : rest.filter((a) => /^\d+$/.test(a)).map(Number);
     if (!ids.length) return console.log(`usage: amalgam memory ${sub} <id>... | --all`);
     if (sub === "reject") return console.log(`rejected ${rejectPending(ids)} proposal(s)`);
-    const saved = acceptPending(ids, { verifyFact });
-    for (const s of saved) console.log(`  proposal ${s.pending} -> L1:${s.fact}${s.state === "stale" ? "  (stale: names a path that does not exist)" : ""}`);
+    const vectors = embeddingsInstalled()
+      ? { embed, toBlob, similarity: vecSimilarity, fromBlob: vecFromBlob }
+      : {};
+    const saved = await acceptPending(ids, { verifyFact, ...vectors });
+    for (const s of saved) {
+      console.log(`  proposal ${s.pending} -> L1:${s.fact}${s.state === "stale" ? "  (stale: names a path that does not exist)" : ""}`);
+      for (const n of s.near ?? []) {
+        console.log(`      close to L1:${n.id} (${n.score.toFixed(2)}) ${n.content.slice(0, 80)}${n.content.length > 80 ? "…" : ""}`);
+      }
+      if (s.near?.length) {
+        console.log(`      if it replaces them: amalgam memory supersede ${s.fact} ${s.near.map((n) => n.id).join(" ")}`);
+      }
+    }
     console.log(`accepted ${saved.length} proposal(s) into memory`);
     return;
   }
@@ -1314,6 +1326,16 @@ accept with: amalgam memory accept ${rows[0].id}${rows.length > 1 ? " <id>..." :
     return;
   }
 
+  if (sub === "supersede") {
+    const ids = args.slice(1).filter((a) => /^\d+$/.test(a)).map(Number);
+    if (ids.length < 2) return console.log("usage: amalgam memory supersede <new-id> <old-id>...");
+    const [newId, ...oldIds] = ids;
+    const n = supersede(newId, oldIds);
+    if (n < 0) return console.log(`No fact L1:${newId}.`);
+    console.log(`superseded ${n} fact(s) by L1:${newId}; they stay as history and leave recall`);
+    return;
+  }
+
   if (sub === "stale" || sub === "list") {
     const where = sub === "stale" ? "verify_state = 'stale' AND superseded_by IS NULL" : "superseded_by IS NULL";
     for (const r of d.prepare(`SELECT id, kind, context, verify_state, content FROM l1_facts WHERE ${where} ORDER BY id`).all()) {
@@ -1331,7 +1353,7 @@ accept with: amalgam memory accept ${rows[0].id}${rows.length > 1 ? " <id>..." :
     return;
   }
 
-  console.log("usage: amalgam memory [verify|list|stale|history|pending|accept|reject|prune|forget]");
+  console.log("usage: amalgam memory [verify|list|stale|history|pending|accept|reject|supersede|prune|forget]");
 }
 
 // ================================================================== tasks
@@ -1550,7 +1572,7 @@ switch (cmd) {
   case "stop": cmdStop(); break;
   case "status": await cmdStatus(); break;
   case "stats": cmdStats(); break;
-  case "memory": cmdMemory(rest); break;
+  case "memory": await cmdMemory(rest); break;
   case "task": cmdTask(rest); break;
   case "check": await cmdCheck(rest); break;
   case "gate": await cmdGate(rest); break;
