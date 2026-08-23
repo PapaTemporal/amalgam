@@ -24,6 +24,8 @@ import { llama, rerankSymbols } from "../lib/llm.mjs";
 import { check as runCheck, render as renderCheck } from "../lib/checks.mjs";
 import { runGate, renderGate, detectChecks } from "../lib/gates.mjs";
 import { rank as rankRisk, render as renderSurvey } from "../lib/survey.mjs";
+import { analyse as analyseCollisions, render as renderCollisions } from "../lib/collide.mjs";
+import { readStreams } from "../lib/streams.mjs";
 import { findSpecs, parseSprintStatus, assess, verify as verifyStories,
          summarise, render as renderTrace } from "../lib/trace.mjs";
 import { open as openDb, ftsQuery, logUsage, DB_PATH } from "../lib/db.mjs";
@@ -419,6 +421,15 @@ const TOOLS = [
     },
   },
   {
+    name: "stream_collisions",
+    description:
+      "What the work streams in flight are about to do to each other: which change the same symbols (a clean merge there is the dangerous case), which merely share a file, which must merge in a particular order because one calls what the other changed, and which are entangled beyond sequencing. Use before merging parallel work, and before starting a new stream next to existing ones.",
+    inputSchema: {
+      type: "object",
+      properties: { repo: { type: "string", description: "Repository directory (default: current)" } },
+    },
+  },
+  {
     name: "survey_repo",
     description:
       "Brownfield triage for a codebase nobody here wrote: the riskiest files by churn times dependents, which of them no test reaches, which files keep changing together despite living apart, and the safest place to make a first change. Measured from git history and the code graph — use it before planning work in an unfamiliar repo.",
@@ -792,6 +803,15 @@ Record what happens with task_note, and save durable facts with memory_save_fact
       const out = renderGate(gate);
       const raw = gate.results.reduce((n, r) => n + r.result.raw.length, 0);
       logUsage("run_gate", 0, out.length, raw);
+      return out;
+    }
+    case "stream_collisions": {
+      const repo = args.repo ?? process.cwd();
+      const db = readStreams();
+      const mine = Object.values(db.streams ?? {}).filter((s) => path.resolve(s.repo) === path.resolve(repo));
+      const report = analyseCollisions(repo, mine, { graph: graphFor(repo), git });
+      const out = renderCollisions(report);
+      logUsage("stream_collisions", 0, out.length);
       return out;
     }
     case "survey_repo": {

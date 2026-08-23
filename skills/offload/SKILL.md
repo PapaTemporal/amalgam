@@ -87,6 +87,14 @@ them and their expensive build directories alone.
   back to Grep/Read only when the graph lacks the answer — and prefer a
   file read outright for a file small enough that a packet would not
   save anything.
+- **Before planning in an unfamiliar repo,** run `survey_repo`: it ranks
+  files by churn times dependents, names the risky ones no test reaches,
+  and finds files that change together despite living apart.
+- **Before claiming a milestone,** run `trace_stories`: it reports which
+  stories declare a way to be checked and which are merely marked done.
+- **Before merging parallel work,** run `stream_collisions`: two streams
+  changing the same symbol merge cleanly and break behaviour, and git
+  cannot see it.
 - **Gate before review.** Finished a change? `run_gate` runs the
   project's own checks and returns one verdict. Never ask for a review of
   something a type checker or a test suite has not seen yet — that spends

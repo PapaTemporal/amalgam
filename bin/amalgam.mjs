@@ -28,6 +28,7 @@ import { verifyFact } from "../lib/verify.mjs";
 import { check as runCheck, render as renderCheck } from "../lib/checks.mjs";
 import { runGate, renderGate, detectChecks } from "../lib/gates.mjs";
 import { rank as rankRisk, render as renderSurvey } from "../lib/survey.mjs";
+import { analyse as analyseCollisions, render as renderCollisions } from "../lib/collide.mjs";
 import { isIndexed, graphFromDb } from "../lib/graphdb.mjs";
 import { loadGraph as loadGraphJson } from "../lib/graph.mjs";
 import { findSpecs, parseSprintStatus, assess, verify as verifyStories,
@@ -1482,6 +1483,37 @@ function parseArgs(argv) {
   return { opts, words };
 }
 
+// ================================================================ collisions
+/**
+ * What parallel work is about to do to itself.
+ *
+ * Streams made parallel development possible and nothing watched what happened
+ * between them. The interesting failure is not the conflict git reports — it is
+ * the merge that succeeds while one stream changed what a function does and
+ * another wrote callers of it.
+ */
+function cmdCollide(args) {
+  const { opts, words } = parseArgs(args);
+  const repo = path.resolve(words[0] ?? process.cwd());
+  const db = readStreams();
+  const mine = Object.values(db.streams ?? {}).filter((s) => path.resolve(s.repo) === repo);
+  if (!mine.length) {
+    console.log(`No streams registered for ${path.basename(repo)}. Open one with: amalgam stream new <name>`);
+    return;
+  }
+  const report = analyseCollisions(repo, mine, { graph: graphForRepo(repo), git: gitForCollide });
+  console.log(renderCollisions(report));
+  process.exitCode = report.pairs.some((p) => p.sharedSymbols.length) ? 1 : 0;
+}
+
+// collide's git helper returns { stdout }, matching the shape lib/graph.mjs
+// expects; the CLI's own returns { out }. Both are accepted there, but being
+// explicit here is cheaper than remembering which.
+const gitForCollide = (repo, args) => {
+  const r = git(repo, args);
+  return { ok: r.ok, stdout: r.out, stderr: r.err };
+};
+
 // =============================================================== brownfield
 /**
  * Where to start in a codebase nobody here wrote.
@@ -1524,6 +1556,7 @@ switch (cmd) {
   case "gate": await cmdGate(rest); break;
   case "trace": await cmdTrace(rest); break;
   case "survey": await cmdSurvey(rest); break;
+  case "collide": cmdCollide(rest); break;
   case "wire": cmdWire(rest); break;
   case "stream": cmdStream(rest); break;
   case "brief": cmdBrief(rest); break;
@@ -1565,6 +1598,8 @@ Usage:
                                     which are only marked done
   amalgam survey [dir] [--days N]   brownfield triage: riskiest files, hidden
                  [--run-checks]     seams, what to cover before touching
+  amalgam collide [dir]             what parallel streams are about to do to
+                                    each other, and the order to merge them
   amalgam stats                     measured tool usage — is any of this earning its keep?
   amalgam memory [sub]              verify | list | stale | history — re-check
                                     stored facts against this machine and show

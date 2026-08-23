@@ -467,6 +467,79 @@ by arrival and a failure ends up hundreds of lines from its own explanation;
 and a timeout kills the whole process tree, since killing the shell leaves the
 test runner underneath it happily hanging.
 
+### Is it done, or just marked done?
+
+A pile of merged stories is not a finished application, and the difference is
+evidence. `amalgam trace` reads the planning layer's own artifacts — a spec
+declares its acceptance criteria, the files it expects to touch, and the
+commands that confirm it; sprint status carries the ids and states — and
+reports which stories can be shown to work.
+
+```bash
+amalgam trace            # what each story declares
+amalgam trace --verify   # actually run each story's own checks
+```
+
+The number that matters is the last one: **stories marked done that declare no
+way to check them.** A spec still wearing its template placeholders counts as
+having declared nothing, and a story naming files that no longer exist is
+reported as drifted.
+
+It will not tell you an acceptance criterion is met. Nothing here reads English
+well enough to know that a passing command proves "given an expired token, then
+the user is asked to sign in again", and a tool implying otherwise manufactures
+exactly the false confidence it exists to remove.
+
+### Starting in a codebase nobody here wrote
+
+Describing an unfamiliar system is one job — and one the planning layer already
+does. Working out which parts of it are *dangerous* is a different question,
+and not one you read: churn from git, dependents from the code graph, and
+whether any test reaches it at all.
+
+```bash
+amalgam survey                  # riskiest files, hidden seams, where to start
+amalgam survey --run-checks     # and whether the project even builds
+```
+
+Risk is churn **times** dependents, because either alone is survivable and the
+product is what "we cannot change this" is made of. The output that earns its
+place is the intersection with no tests — the characterization tests to write
+*before* touching anything — followed by the safest place to make a first
+change, so an agent's first contribution is verifiable before anyone trusts it.
+
+Pointed at this repository it reported, correctly and unwelcomely, that
+`bin/amalgam.mjs` has thirty commits and no test reaching it, and that it
+changes together with `mcp/server.mjs` ten times over — every capability has to
+be registered in both places.
+
+### What parallel work is about to do to itself
+
+Streams make parallel development possible; nothing watched what happened
+between them. The interesting failure is not the conflict git reports. It is
+the merge that succeeds while one stream changed what a function returns and
+another wrote new callers of it — both suites green in isolation, both wrong
+together.
+
+Git compares text and cannot see that. The graph knows who calls what:
+
+```bash
+amalgam collide
+```
+
+```text
+COLLISION  tighten-auth + cache-auth — both change: validateToken (src/auth.js)
+           A clean merge here is the dangerous case: both tested green apart.
+order      tighten-auth before audit-api — audit-api calls validateToken, which tighten-auth changes
+
+Merge order: cache-auth -> report-format -> tighten-auth -> audit-api
+```
+
+Streams changing disjoint code are reported as exactly that and nothing else —
+a detector that cries wolf on independent work is ignored within a day. A cycle
+is reported as *entangled*: two streams that cannot be sequenced and must be
+integrated together, which is worth knowing before the merging starts.
+
 ### Let the cheap tools rule first
 
 Asking the expensive model "is this change right?" pays frontier prices for a
