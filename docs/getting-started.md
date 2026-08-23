@@ -2,6 +2,21 @@
 
 Your first hour, and what to expect while it happens.
 
+## Two ways through this
+
+Everything below can be done from a screen or from a terminal. Neither is the
+"real" one — they run the same code, and you can switch at any point.
+
+| | |
+|---|---|
+| **`amalgam ui`** | Setup wizards with live progress, project dashboards, metrics, and buttons that compose a context-loaded prompt. Nothing to install: it ships compiled. See **[the interface](ui.md)**. |
+| **The CLI** | Every capability as a command. Scriptable, remote-friendly, no browser. That is the path this page follows. |
+
+If you would rather click than type, run `amalgam ui` after step 0 below and
+let the wizard take over — the rest of this page describes what it is doing on
+your behalf.
+
+
 ## 0. Install and wire (5 minutes, once per machine)
 
 ```bash

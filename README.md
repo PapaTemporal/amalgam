@@ -17,7 +17,14 @@ node bin/amalgam.mjs wire --user
 node bin/amalgam.mjs shim
 ```
 
-Then, in any project: `amalgam graph`, restart your agent session, and work.
+Then either drive it from a screen:
+
+```bash
+amalgam ui          # optional; ships compiled, nothing to build
+```
+
+or stay in the terminal: `amalgam graph` in any project, restart your agent
+session, and work.
 
 ## The measured version
 
@@ -70,6 +77,7 @@ symbols rather than text, and hands you a merge order.
 | Your first hour, greenfield or brownfield | **[Getting started](docs/getting-started.md)** |
 | How it composes with BMAD into an SDLC | **[The workflow](docs/workflow.md)** |
 | Every command and tool, by the question it answers | **[Tool map](docs/tools.md)** |
+| The optional interface: wizards, dashboards, metrics | **[The interface](docs/ui.md)** |
 | Requirements, wiring, proxies, updating | **[Installing](docs/install.md)** |
 | Why each part works the way it does | **[Design notes](docs/design.md)** |
 

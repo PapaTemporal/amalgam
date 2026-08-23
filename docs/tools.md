@@ -7,6 +7,10 @@ are the same capabilities exposed to an agent, and the session hook tells the
 agent they exist. Anything you can check by hand, the agent is using the same
 way.
 
+There is a third, optional surface: `amalgam ui` puts most of this behind a
+screen — see [the interface](ui.md). It calls exactly these functions, so
+nothing here is bypassed or duplicated by it.
+
 ## When you want to…
 
 | You want to | Use |

@@ -7,6 +7,12 @@ on purpose, and this page is about how they compose.
 The short version: **BMAD decides what to do; amalgam supplies what is known
 and checks what was claimed.**
 
+Every command on this page has an equivalent button in `amalgam ui` — phase 0
+is the project dashboard, and phases 1 to 4 are the four "start work" buttons,
+which compose the same prompts with the context already gathered. The commands
+are written out here because they are the precise version, and because a page
+of screenshots ages badly.
+
 ## Which SDLC
 
 BMAD is a plan-then-build cycle with an explicit review gate. Read it as five
