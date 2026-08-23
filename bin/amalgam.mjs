@@ -1564,6 +1564,42 @@ function graphForRepo(repo) {
   } catch { return null; }
 }
 
+// ==================================================================== ui
+/**
+ * The optional interface.
+ *
+ * Optional in the strong sense: nothing else in amalgam knows this exists, and
+ * everything it offers is a command you could have typed. It binds to the
+ * loopback address only — not as a default that could be overridden, but
+ * because a tool with no network surface needs no authentication and cannot
+ * grow one by accident.
+ */
+async function cmdUi(args) {
+  const { opts } = parseArgs(args);
+  const port = Number(opts.port ?? 7777);
+  const { createServer } = await import("../lib/uiserver.mjs");
+  const { buildApi } = await import("../lib/uiapi.mjs");
+
+  const server = createServer({ api: buildApi() });
+  server.on("error", (e) => {
+    if (e.code === "EADDRINUSE") {
+      console.error(`Port ${port} is busy — something else is listening. Try: amalgam ui --port ${port + 1}`);
+      process.exit(1);
+    }
+    throw e;
+  });
+  server.listen(port, "127.0.0.1", () => {
+    const url = `http://127.0.0.1:${port}`;
+    console.log(`amalgam ui -> ${url}`);
+    console.log(`(local only; nothing is exposed to the network. Ctrl+C to stop.)`);
+    if (opts.open !== false && !opts["no-open"]) {
+      const cmd = process.platform === "win32" ? `start "" "${url}"`
+        : process.platform === "darwin" ? `open "${url}"` : `xdg-open "${url}"`;
+      try { spawn(cmd, { shell: true, stdio: "ignore", detached: true }).unref(); } catch { /* the URL is printed above */ }
+    }
+  });
+}
+
 // ---------------------------------------------------------------- dispatch
 const [cmd, ...rest] = process.argv.slice(2);
 switch (cmd) {
@@ -1579,6 +1615,7 @@ switch (cmd) {
   case "trace": await cmdTrace(rest); break;
   case "survey": await cmdSurvey(rest); break;
   case "collide": cmdCollide(rest); break;
+  case "ui": await cmdUi(rest); break;
   case "wire": cmdWire(rest); break;
   case "stream": cmdStream(rest); break;
   case "brief": cmdBrief(rest); break;
@@ -1622,6 +1659,8 @@ Usage:
                  [--run-checks]     seams, what to cover before touching
   amalgam collide [dir]             what parallel streams are about to do to
                                     each other, and the order to merge them
+  amalgam ui [--port N] [--no-open] open the optional local interface: setup
+                                    wizard, project dashboards, metrics
   amalgam stats                     measured tool usage — is any of this earning its keep?
   amalgam memory [sub]              verify | list | stale | history — re-check
                                     stored facts against this machine and show

@@ -11,3 +11,8 @@ graphify-out/
 .mcp.json
 .vscode/mcp.json
 .github/copilot-instructions.md
+
+# UI: source and the compiled output are both committed, so `amalgam ui` works
+# straight from a clone. Only the toolchain's own artefacts are ignored.
+ui/node_modules/
+ui/.svelte-kit/
