@@ -33,6 +33,9 @@ idle minutes.
 amalgam status
 ```
 
+Requirements, proxies, per-project wiring and updating are all in
+[Installing](install.md) — you should not need any of it to start.
+
 ## 1. Point it at a codebase (2 minutes)
 
 ```bash
@@ -185,6 +188,38 @@ If you would rather none of this happened, `AMALGAM_CAPTURE=off` stops it
 entirely, and `amalgam memory forget --all` deletes what is already there
 without touching your distilled facts.
 
+## Starting a session: `/start`
+
+BMAD is a set of workflows, not a front door — it never asks what you want to
+do, so every session begins with a blank prompt. The `start` skill is that
+front door. It loads state first (`amalgam brief`: git, work streams, BMAD
+artifacts and their statuses, whether a code graph exists) plus memory of past
+sessions, then offers concrete choices:
+
+> **Build** · **Plan** · **Investigate** · **Housekeeping**
+
+It drills down with real names — "continue story 2.3 (in review)" rather than
+"work on a story" — then routes into the matching BMAD workflow with context
+already loaded, opening a work stream first when the task is build-heavy.
+Invoke it as `/start`, or just say "what should I work on".
+
+`amalgam brief` is useful on its own:
+
+```bash
+amalgam brief                     # current directory
+amalgam brief C:\path\to\repo     # a specific project
+```
+
+```text
+PROJECT  api-server  (C:\path\to\workspace\api-server)
+GIT      branch main | 3 uncommitted change(s)
+         open branches: fix/20260820-null-session-token
+STREAMS  none
+BMAD     installed | 49 bmad skills | output _bmad-output
+GRAPH    built (C:\path\to\workspace\api-server\graphify-out\graph.json)
+RUNTIME  memory=sqlite (no service) model=installed
+```
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
@@ -195,3 +230,8 @@ without touching your distilled facts.
 | `digest` / capture unavailable | No local model | `amalgam install --with-model` |
 | `amalgam` command not found | Alias trouble | `amalgam shim`, or call `node bin/amalgam.mjs` |
 | Facts mention paths that are gone | Normal drift | `amalgam memory verify`, then supersede |
+
+---
+
+Next: [the workflow](workflow.md) for how this composes with BMAD, or the
+[tool map](tools.md) when you want to know which tool answers which question.

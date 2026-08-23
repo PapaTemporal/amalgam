@@ -173,3 +173,8 @@ amalgam shim
 The MCP server your agent talks to is spawned when the session starts. After
 `amalgam update`, an open session keeps the tool list it began with — restart
 it before expecting new tools to exist.
+
+---
+
+New here? [Getting started](getting-started.md) walks the first hour. For the
+reasoning behind each behaviour, see [design notes](design.md).

@@ -175,3 +175,8 @@ rejects, the queue grows and the store stays empty — the worst of both.
 
 If day 5 ends with `amalgam trace --verify` showing one story proven, the setup
 works. Scale from there.
+
+---
+
+See the [tool map](tools.md) for what each command does, or [design notes](design.md)
+for why the pieces behave the way they do.
