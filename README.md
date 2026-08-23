@@ -1,11 +1,48 @@
 # Amalgam
 
-Local offload stack for frontier-model coding agents. An amalgamation of four
-ideas — **BMAD** (skill orchestration), **TencentDB-Agent-Memory** (L0→L3
-layered memory), **caveman** (telegraphic token compression), **graphify**
-(code knowledge graphs) — rebuilt to run **fully local, portable, zero
-installs, zero admin, zero cloud**. The only network call the agent ever makes
-is its own call to the frontier model.
+**Your AI coding agent spends most of its budget re-deriving things your laptop
+already knows.** Reading three files to find one function. Pasting two thousand
+lines of test output to find the nine that failed. Re-learning your conventions
+every session. Reviewing a change a type checker would have rejected for free.
+
+Amalgam does that work locally and hands the model the answer. Memory that
+survives sessions and corrects itself, a code graph that produces evidence
+instead of file dumps, test runs that report only what failed, and verification
+that says whether the work is actually finished.
+
+Fully local, portable, zero installs, zero admin, zero cloud. The only network
+call in the system is the agent's own call to the frontier model.
+
+```bash
+git clone https://github.com/papatemporal/amalgam.git && cd amalgam
+node bin/amalgam.mjs install --with-embeddings
+node bin/amalgam.mjs wire --user
+node bin/amalgam.mjs shim
+```
+
+Then, in any project: `amalgam graph`, restart your agent session, and work.
+
+## Start here
+
+| If you want | Read |
+|---|---|
+| Why this exists, what it solves, what it measurably saves | **[Why amalgam](docs/why.md)** |
+| Your first hour, greenfield or brownfield | **[Getting started](docs/getting-started.md)** |
+| How this composes with BMAD into an SDLC | **[The workflow](docs/workflow.md)** |
+| Every command and tool, and when to reach for it | **[Tool map](docs/tools.md)** |
+
+Measured on this repository: evidence packets **89.6% smaller** than the file
+reads they replace, a full test run reported in **184 characters instead of
+7,768**, and code search that finds the right symbol in the top five **ten times
+in twelve** where name matching manages one. `amalgam stats` keeps the running
+total, and counts a saving only where a real counterfactual exists.
+
+## What it is made of
+
+An amalgamation of four ideas — **BMAD** (skill orchestration),
+**TencentDB-Agent-Memory** (L0→L3 layered memory), **caveman** (telegraphic
+token compression), **graphify** (code knowledge graphs) — rebuilt to run on a
+laptop with no admin rights.
 
 ```
 Claude Code / Copilot ──stdio──▶ ~/.amalgam/mcp/server.mjs (zero-dep Node)
@@ -15,9 +52,12 @@ Claude Code / Copilot ──stdio──▶ ~/.amalgam/mcp/server.mjs (zero-dep N
           SQLite (built in)   llama.cpp + Qwen3-4B    graphify (via uv)
           one file, no daemon OPTIONAL, :8642     tree-sitter, no LLM
           L0 log / L1 facts   digest (bulk -> dense)  graph explain/path/query
-          L2 scenarios        caveman compress/expand
+          L2 scenarios        rerank, session capture
           L3 persona
 ```
+
+The rest of this file is reference and design rationale — why each part works
+the way it does. If you are new, the four pages above are the faster route.
 
 ## Requirements
 
