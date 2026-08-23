@@ -27,6 +27,11 @@ import { open as openDb } from "../lib/db.mjs";
 import { verifyFact } from "../lib/verify.mjs";
 import { check as runCheck, render as renderCheck } from "../lib/checks.mjs";
 import { runGate, renderGate, detectChecks } from "../lib/gates.mjs";
+import { rank as rankRisk, render as renderSurvey } from "../lib/survey.mjs";
+import { isIndexed, graphFromDb } from "../lib/graphdb.mjs";
+import { loadGraph as loadGraphJson } from "../lib/graph.mjs";
+import { findSpecs, parseSprintStatus, assess, verify as verifyStories,
+         summarise, render as renderTrace } from "../lib/trace.mjs";
 // The reclamation rules live in lib/streams.mjs so they can be tested against
 // real repositories; this file only prints what they decide.
 import { git, readStreams, writeStreams, streamKey, inspectStream, classify,
@@ -1437,6 +1442,74 @@ async function cmdGate(args) {
   process.exitCode = gate.passed === false ? 1 : 0;
 }
 
+// ============================================================== traceability
+/**
+ * Which stories can be shown to work, and which are merely marked done.
+ *
+ * Reads the planning layer's own artifacts rather than a format invented for
+ * the purpose, and refuses to overclaim: running a story's declared command is
+ * evidence that the check passed, never that the acceptance criteria are met.
+ */
+async function cmdTrace(args) {
+  const root = path.resolve(args.find((a) => !a.startsWith("--")) ?? process.cwd());
+  const specs = findSpecs(root);
+  const sprintStatus = parseSprintStatus(root);
+  const assessed = specs.map((s) => assess(s, { repo: root, sprintStatus }));
+  const shouldVerify = args.includes("--verify");
+  if (shouldVerify) await verifyStories(assessed, { repo: root, check: runCheck });
+  console.log(renderTrace(assessed, summarise(assessed), { verified: shouldVerify }));
+  process.exitCode = summarise(assessed).failing.length ? 1 : 0;
+}
+
+/**
+ * Split `--name value` options from positional words.
+ *
+ * Filtering out tokens that start with "--" is the obvious approach and the
+ * wrong one: it leaves each option's VALUE behind, so `--limit 6` donates a
+ * stray "6" to the positionals and something downstream treats it as a path.
+ * Flags with no value are recorded as present.
+ */
+function parseArgs(argv) {
+  const opts = {};
+  const words = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (!argv[i].startsWith("--")) { words.push(argv[i]); continue; }
+    const name = argv[i].slice(2);
+    const next = argv[i + 1];
+    if (next !== undefined && !next.startsWith("--")) { opts[name] = next; i++; }
+    else opts[name] = true;
+  }
+  return { opts, words };
+}
+
+// =============================================================== brownfield
+/**
+ * Where to start in a codebase nobody here wrote.
+ *
+ * The planning layer describes what a system is; this measures which parts of
+ * it are dangerous, from history, dependents and test reach. Deliberately
+ * separate from that description: one is read, the other is counted.
+ */
+async function cmdSurvey(args) {
+  const { opts, words } = parseArgs(args);
+  const repo = path.resolve(words[0] ?? process.cwd());
+  const g = graphForRepo(repo);
+  if (!g) console.log("(no code graph — run 'amalgam graph' for dependents and test reach; history only for now)\n");
+  const survey = rankRisk(repo, { graph: g, days: Number(opts.days ?? 365), limit: Number(opts.limit ?? 12) });
+  const gate = opts["run-checks"] !== undefined
+    ? await runGate(repo, { stopOnFirst: true })
+    : (detectChecks(repo).length ? null : { detected: false });
+  console.log(renderSurvey(survey, { repo, gate }));
+}
+
+/** The graph for a repo from the index, falling back to the built document. */
+function graphForRepo(repo) {
+  try {
+    if (isIndexed(repo)) { const g = graphFromDb(repo); if (g?.nodes.size) return g; }
+    return loadGraphJson(repo);
+  } catch { return null; }
+}
+
 // ---------------------------------------------------------------- dispatch
 const [cmd, ...rest] = process.argv.slice(2);
 switch (cmd) {
@@ -1449,6 +1522,8 @@ switch (cmd) {
   case "task": cmdTask(rest); break;
   case "check": await cmdCheck(rest); break;
   case "gate": await cmdGate(rest); break;
+  case "trace": await cmdTrace(rest); break;
+  case "survey": await cmdSurvey(rest); break;
   case "wire": cmdWire(rest); break;
   case "stream": cmdStream(rest); break;
   case "brief": cmdBrief(rest); break;
@@ -1486,6 +1561,10 @@ Usage:
                                     what failed, with the exit code
   amalgam gate [dir] [--list]       run every check this project defines
                  [--all]            (--list shows what was detected)
+  amalgam trace [dir] [--verify]    which stories can be shown to work, and
+                                    which are only marked done
+  amalgam survey [dir] [--days N]   brownfield triage: riskiest files, hidden
+                 [--run-checks]     seams, what to cover before touching
   amalgam stats                     measured tool usage — is any of this earning its keep?
   amalgam memory [sub]              verify | list | stale | history — re-check
                                     stored facts against this machine and show

@@ -23,6 +23,9 @@ import { ensureLlama, modelInstalled } from "../lib/services.mjs";
 import { llama, rerankSymbols } from "../lib/llm.mjs";
 import { check as runCheck, render as renderCheck } from "../lib/checks.mjs";
 import { runGate, renderGate, detectChecks } from "../lib/gates.mjs";
+import { rank as rankRisk, render as renderSurvey } from "../lib/survey.mjs";
+import { findSpecs, parseSprintStatus, assess, verify as verifyStories,
+         summarise, render as renderTrace } from "../lib/trace.mjs";
 import { open as openDb, ftsQuery, logUsage, DB_PATH } from "../lib/db.mjs";
 import { embed, similarity, toBlob, fromBlob, embeddingsInstalled } from "../lib/embed.mjs";
 import { verifyFact } from "../lib/verify.mjs";
@@ -416,6 +419,31 @@ const TOOLS = [
     },
   },
   {
+    name: "survey_repo",
+    description:
+      "Brownfield triage for a codebase nobody here wrote: the riskiest files by churn times dependents, which of them no test reaches, which files keep changing together despite living apart, and the safest place to make a first change. Measured from git history and the code graph — use it before planning work in an unfamiliar repo.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: { type: "string", description: "Repository directory (default: current)" },
+        days: { type: "integer", default: 365, description: "How far back to read history" },
+        limit: { type: "integer", default: 12, minimum: 3, maximum: 40 },
+      },
+    },
+  },
+  {
+    name: "trace_stories",
+    description:
+      "Join the planning layer to the evidence: reads story/spec files and sprint status, and reports which stories declare a way to check themselves, which pass that check, and which are marked done while resting on nothing re-checkable. Use before claiming a milestone is complete. It reports evidence, never that an acceptance criterion is semantically met.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: { type: "string", description: "Project or workspace directory (default: current)" },
+        verify: { type: "boolean", default: false, description: "Actually run each story's declared verification commands" },
+      },
+    },
+  },
+  {
     name: "code_context",
     description:
       "Assemble an evidence packet for a task from a repo's code graph: the symbols that matter, who calls them, what they call, and their CURRENT source lines read from disk. Use this INSTEAD of reading whole files when you need to understand or change existing code — it returns the few hundred tokens that bear on the task rather than the few thousand that surround them. Requires a built graph (amalgam graph).",
@@ -764,6 +792,21 @@ Record what happens with task_note, and save durable facts with memory_save_fact
       const out = renderGate(gate);
       const raw = gate.results.reduce((n, r) => n + r.result.raw.length, 0);
       logUsage("run_gate", 0, out.length, raw);
+      return out;
+    }
+    case "survey_repo": {
+      const repo = args.repo ?? process.cwd();
+      const survey = rankRisk(repo, { graph: graphFor(repo), days: args.days ?? 365, limit: args.limit ?? 12 });
+      const out = renderSurvey(survey, { repo, gate: detectChecks(repo).length ? null : { detected: false } });
+      logUsage("survey_repo", 0, out.length);
+      return out;
+    }
+    case "trace_stories": {
+      const root = args.repo ?? process.cwd();
+      const assessed = findSpecs(root).map((s) => assess(s, { repo: root, sprintStatus: parseSprintStatus(root) }));
+      if (args.verify) await verifyStories(assessed, { repo: root, check: runCheck });
+      const out = renderTrace(assessed, summarise(assessed), { verified: !!args.verify });
+      logUsage("trace_stories", 0, out.length);
       return out;
     }
     case "code_context": {
