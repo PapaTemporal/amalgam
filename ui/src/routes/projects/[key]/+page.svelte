@@ -32,7 +32,19 @@
   async function startFlow(kind) {
     flow = await post("/flow/compose", { key, flow: kind });
     copied = false;
+    // Deep-linkable, so a composed prompt can be bookmarked or sent to
+    // somebody else rather than described to them.
+    const url = new URL(window.location.href);
+    url.searchParams.set("flow", kind);
+    history.replaceState({}, "", url);
   }
+
+  // Opening /projects/<key>?flow=feature composes it immediately.
+  let autoFlow = $state(false);
+  $effect(() => {
+    const wanted = page.url.searchParams.get("flow");
+    if (data && wanted && !autoFlow) { autoFlow = true; startFlow(wanted); }
+  });
 
   async function copyPrompt() {
     await navigator.clipboard.writeText(flow.prompt);
@@ -65,10 +77,10 @@
   <div class="card" style="margin-bottom:1.25rem">
     <h2>Start work</h2>
     <div class="row">
-      <button class="primary" onclick={() => startFlow("feature")}>New feature</button>
-      <button onclick={() => startFlow("story")}>Continue a story</button>
-      <button onclick={() => startFlow("fix")}>Fix a bug</button>
-      <button onclick={() => startFlow("explore")}>Understand this code</button>
+      <button class:primary={!flow || flow.id === "feature"} onclick={() => startFlow("feature")}>New feature</button>
+      <button class:primary={flow?.id === "story"} onclick={() => startFlow("story")}>Continue a story</button>
+      <button class:primary={flow?.id === "fix"} onclick={() => startFlow("fix")}>Fix a bug</button>
+      <button class:primary={flow?.id === "explore"} onclick={() => startFlow("explore")}>Understand this code</button>
     </div>
 
     {#if flow}
@@ -203,5 +215,9 @@
 
 <style>
   .flow { margin-top: .9rem; border-top: 1px solid var(--line); padding-top: .9rem; }
+  /* Wrapped rather than scrolled: the whole point of showing the prompt is
+     that someone reads it before it runs, and a horizontal scrollbar is where
+     reading stops. */
+  .flow :global(pre.out) { white-space: pre-wrap; word-break: break-word; max-height: 420px; }
   ul.plain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
 </style>

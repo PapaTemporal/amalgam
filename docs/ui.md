@@ -8,6 +8,8 @@ That is the whole installation step. The interface ships compiled inside the
 repository, so a clone is all you need — no `npm install`, no build, no
 toolchain. It opens a local page and serves it from Node's own http server.
 
+![The projects view](images/projects.png)
+
 It is **optional in the strong sense**: nothing else in amalgam knows it
 exists, every screen does something you could type, and if you never run it
 you lose nothing. Some people think in commands; this is for the rest, and for
@@ -43,6 +45,8 @@ how long before it shuts itself down, and which agent CLIs were found.
 
 ### Setup
 
+![The setup wizard](images/setup.png)
+
 Two wizards, both showing their work.
 
 **This machine** installs amalgam, wires it for every project, and puts
@@ -59,6 +63,8 @@ The folder chooser lists real directories from your machine and marks which
 are already git repositories or already have BMAD.
 
 ### A project
+
+![A project dashboard](images/project.png)
 
 Everything about one codebase on one page.
 
@@ -88,9 +94,15 @@ Four buttons for the four shapes of work people actually begin:
 | **Fix a bug** | Reproduce first, understand the blast radius, change as little as possible |
 | **Understand this code** | Survey an unfamiliar codebase before touching it |
 
+![A composed prompt, shown before it runs](images/flow.png)
+
 **Every button shows you the prompt before anything runs.** A button that hides
 what it is about to ask an agent to do is a button nobody can review, so the
 composed text is on screen, copyable, and yours to edit.
+
+Each flow is deep-linkable — `?flow=feature` on a project URL composes it
+immediately, so a prompt can be bookmarked or sent to somebody rather than
+described to them.
 
 What makes it worth pressing is what is already in it. The prompt arrives
 carrying the project path, whether a code graph exists, the project's real
@@ -109,6 +121,8 @@ worse than what you have now.
 
 ### Metrics
 
+![Metrics](images/metrics.png)
+
 Measured savings per tool, what was avoided in total, and recent daily volume.
 It keeps the same discipline as `amalgam stats`: a saving is only counted where
 a real counterfactual exists — a packet knows the files it replaced, a digest
@@ -116,6 +130,8 @@ knows what it consumed. Recall is shown as *not measurable*, because measuring
 it would mean running the alternative.
 
 ### Memory
+
+![Memory](images/memory.png)
 
 What survives between sessions, filterable, with stale facts marked. If a
 finished session proposed anything, it is at the top waiting for review —

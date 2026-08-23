@@ -26,6 +26,12 @@ amalgam ui          # optional; ships compiled, nothing to build
 or stay in the terminal: `amalgam graph` in any project, restart your agent
 session, and work.
 
+![A project dashboard, with a composed prompt ready to run](docs/images/flow.png)
+
+*The optional interface: everything about one codebase on one page, and a
+prompt that arrives already carrying the project's graph status, real check
+command, open work, and what memory holds.*
+
 ## The measured version
 
 | Instead of | You get | Measured |
