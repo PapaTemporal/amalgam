@@ -16,7 +16,7 @@ If you would rather click than type, run `amalgam ui` after step 0 below and
 let the wizard take over — the rest of this page describes what it is doing on
 your behalf.
 
-![The setup wizard](images/setup.png)
+![The setup wizard, choosing what to install](images/setup.png)
 
 
 ## 0. Install and wire (5 minutes, once per machine)

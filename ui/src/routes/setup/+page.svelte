@@ -19,11 +19,26 @@
     if (!state) get("/state").then((s) => { state = s; model = s.model; });
   });
 
-  async function run(endpoint, body) {
-    const { jobId } = await post(endpoint, body);
+  function follow(jobId) {
     job = { state: "running", steps: [] };
     watchJob(jobId, (u) => (job = u));
+    // In the URL so a refresh — or a second window — keeps watching rather
+    // than losing a job that is still running.
+    const url = new URL(window.location.href);
+    url.searchParams.set("job", jobId);
+    history.replaceState({}, "", url);
   }
+
+  async function run(endpoint, body) {
+    const { jobId } = await post(endpoint, body);
+    follow(jobId);
+  }
+
+  let followed = $state(false);
+  $effect(() => {
+    const existing = page.url.searchParams.get("job");
+    if (existing && !followed) { followed = true; follow(existing); }
+  });
 
   const done = $derived(job?.state === "done");
 </script>
@@ -40,7 +55,7 @@
 
 {#if job}
   <div class="card">
-    <h2>{mode === "machine" ? "Setting up amalgam" : "Setting up the project"}</h2>
+    <h2>{job.title ?? (mode === "machine" ? "Setting up amalgam" : "Setting up the project")}</h2>
     <Stepper steps={job.steps} state={job.state} error={job.error} />
     {#if done}
       <div class="row" style="margin-top:.5rem">

@@ -45,22 +45,33 @@ how long before it shuts itself down, and which agent CLIs were found.
 
 ### Setup
 
-![The setup wizard](images/setup.png)
-
 Two wizards, both showing their work.
 
 **This machine** installs amalgam, wires it for every project, and puts
-`amalgam` on your PATH. The two optional downloads — semantic recall (~220 MB)
-and the local model (~2.5 GB) — are checkboxes with their sizes stated, and
-already-installed pieces say so.
+`amalgam` on your PATH. The two optional downloads are checkboxes with their
+sizes stated, and anything already installed says so:
 
-**A project** asks which folder, then optionally initialises git, installs the
-BMAD workflows, wires amalgam into the project, and builds the code graph.
+![Choosing what to install](images/setup.png)
 
-Each step reports when it starts, shows the last lines it printed, and stops
-the sequence if it fails — because the steps after a failure assume it worked.
-The folder chooser lists real directories from your machine and marks which
-are already git repositories or already have BMAD.
+Each step reports as it runs and turns green as it finishes, so a long install
+never looks like a hang:
+
+![The machine set up](images/setup-machine-done.png)
+
+**A project** starts by asking which folder. The chooser lists real directories
+from your machine and marks which are already git repositories or already have
+BMAD — no typing paths:
+
+![Choosing a project folder](images/setup-picker.png)
+
+Then it initialises git if needed, installs the BMAD workflows, wires amalgam
+in, and builds the code graph:
+
+![A project set up](images/setup-project-done.png)
+
+A step that fails stops the sequence, because the steps after it assume it
+worked, and its last lines of output are shown in place so you can see why
+without going to look for a log.
 
 ### A project
 

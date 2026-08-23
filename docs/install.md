@@ -4,6 +4,15 @@ Everything in this file is a one-time setup concern. If you just want to get
 going, [Getting started](getting-started.md) is the shorter road; come back
 here when something needs configuring.
 
+**Or do none of it by hand.** `amalgam ui` runs the same steps as a wizard and
+shows each one as it happens:
+
+![Choosing what to install](images/setup.png)
+
+![The machine set up](images/setup-machine-done.png)
+
+The commands below are what those buttons run.
+
 ## Requirements
 
 - **Node 22.5+** (the only hard prerequisite — it supplies the built-in SQLite the memory
