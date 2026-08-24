@@ -35,6 +35,7 @@ import { createTask, addEvent, setState, listTasks, resume, renderResume } from 
 import { loadGraph, hasGraph, findSymbols, sliceSymbol, callersOf, calleesOf,
          changedFiles, changedRanges, symbolsInRanges } from "../lib/graph.mjs";
 import { isIndexed, graphFromDb, searchSymbols } from "../lib/graphdb.mjs";
+import { graphFor as graphForAny, isWorkspace, searchWorkspace } from "../lib/workspace.mjs";
 
 // Machine-level home: runtimes, model, and data live here (shared by all
 // projects on the machine). The package itself only carries code.
@@ -127,11 +128,10 @@ const git = (repo, args) => {
  * downstream needs to know which it got.
  */
 function graphFor(repo) {
-  if (isIndexed(repo)) {
-    const g = graphFromDb(repo);
-    if (g && g.nodes.size) return g;
-  }
-  return loadGraph(repo);
+  // A project is a workspace and its graph is the union of its services'.
+  // Handled in lib/workspace.mjs so an agent asking a project about its code
+  // gets an answer whether it was handed the workspace or one repository.
+  return graphForAny(repo);
 }
 
 /**
@@ -150,7 +150,9 @@ async function selectSymbols(repo, g, task, limit, { rerank = true } = {}) {
         // five from 6/12 to 10/12, for a few seconds of local compute — a
         // trade this project exists to make. The first hits are never
         // reordered; see rerankSymbols for why.
-        const wide = searchSymbols(repo, task, { vec: qv, limit: Math.max(limit * 4, 20), similarity, fromBlob });
+        const wide = g.workspace
+          ? searchWorkspace(repo, task, { vec: qv, limit: Math.max(limit * 4, 20), similarity, fromBlob })
+          : searchSymbols(repo, task, { vec: qv, limit: Math.max(limit * 4, 20), similarity, fromBlob });
         const ordered = rerank ? (await rerankSymbols(task, wide)) ?? wide : wide;
         const hits = ordered.slice(0, limit);
         if (hits.length) return hits.map((h) => g.nodes.get(h.id) ?? h);
@@ -832,7 +834,7 @@ Record what happens with task_note, and save durable facts with memory_save_fact
     case "code_context": {
       const repo = args.repo;
       if (!fs.existsSync(repo)) throw new Error(`Repo not found: ${repo}`);
-      if (!hasGraph(repo) && !isIndexed(repo)) throw new Error(`No code graph in ${repo}. Build one with 'amalgam graph' (or graph_query mode=build).`);
+      if (!hasGraph(repo) && !isIndexed(repo) && !isWorkspace(repo)) throw new Error(`No code graph in ${repo}. Build one with 'amalgam graph' (or graph_query mode=build).`);
       const g = graphFor(repo);
       if (!g) throw new Error(`No code graph in ${repo}. Build one with 'amalgam graph'.`);
       const found = await selectSymbols(repo, g, args.task, Math.min(Math.max(args.max_symbols ?? 5, 1), 15),
@@ -864,7 +866,7 @@ Record what happens with task_note, and save durable facts with memory_save_fact
     case "graph_impact": {
       const repo = args.repo;
       if (!fs.existsSync(repo)) throw new Error(`Repo not found: ${repo}`);
-      if (!hasGraph(repo) && !isIndexed(repo)) throw new Error(`No code graph in ${repo}. Build one with 'amalgam graph'.`);
+      if (!hasGraph(repo) && !isIndexed(repo) && !isWorkspace(repo)) throw new Error(`No code graph in ${repo}. Build one with 'amalgam graph'.`);
       const rev = args.rev ?? "HEAD";
       const g = graphFor(repo);
       if (!g) throw new Error(`No code graph in ${repo}. Build one with 'amalgam graph'.`);

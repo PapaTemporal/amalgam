@@ -29,8 +29,11 @@
     });
   }
 
-  async function addService(servicePath) {
-    const added = await post("/projects/add", { path: servicePath });
+  async function openService(event, svc) {
+    // Registered on the way in, so a service can be opened straight from its
+    // project without being added by hand first.
+    event.preventDefault();
+    const added = await post("/projects/add", { path: svc.path });
     location.href = `/projects/${added.project.key}`;
   }
 
@@ -58,6 +61,7 @@
 
   const p = $derived(data?.project);
   const unproven = $derived(data?.trace?.summary?.unproven ?? []);
+  const servicesWithChecks = $derived((p?.services ?? []).filter((s) => s.checks.length));
 </script>
 
 {#if error}
@@ -75,26 +79,6 @@
       </div>
     </div>
   </header>
-
-  {#if p.isWorkspace}
-    <!-- The failure that looks like a bug: a folder holding repositories is
-         not a project, so a graph never appears there however many times the
-         button is pressed, and no checks are found either. Say it plainly and
-         offer the thing that does work. -->
-    <div class="card notice" style="margin-bottom:1.25rem">
-      <strong>This folder holds {p.services.length} repositories — it is not a project itself.</strong>
-      <p class="tiny muted" style="margin:.4rem 0 .75rem">
-        A code graph and a set of checks belong to each repository, not to the folder above them.
-        That is why building a graph here never changes anything, and why no checks were detected.
-        Add the repositories instead:
-      </p>
-      <div class="row">
-        {#each p.services as svc}
-          <button onclick={() => addService(svc.path)}>{svc.name}</button>
-        {/each}
-      </div>
-    </div>
-  {/if}
 
   <!-- What the agent can be asked to do. The three shapes of work people
        actually start: something new, something already specified, or a look
@@ -130,8 +114,11 @@
     <div class="card">
       <span class="label">Code graph</span>
       {#if p.graph}
-        <div class="stat small">{p.graph.symbols} symbols</div>
-        <span class="tiny faint">{p.graph.edges} edges · indexed {p.graph.importedAt}</span>
+        <div class="stat small">{p.graph.symbols.toLocaleString()} symbols</div>
+        <span class="tiny faint">
+          {p.graph.edges.toLocaleString()} edges
+          {#if p.graph.services}· across {p.graph.services.filter((s) => s.indexed).length} of {p.graph.services.length} services{/if}
+        </span>
       {:else}
         <div class="stat small">none</div>
         <span class="tiny faint">{p.graphBlocked ?? "code search and impact need this"}</span>
@@ -145,12 +132,16 @@
 
     <div class="card">
       <span class="label">Checks</span>
-      <div class="stat small">{p.checks.length ? p.checks.join(", ") : "none detected"}</div>
-      <span class="tiny faint">
-        {p.checks.length ? "run before any review"
-          : p.isWorkspace ? "checks live in each repository, not here"
-          : "without these, nothing can tell if a change broke something"}
-      </span>
+      {#if p.checks.length}
+        <div class="stat small">{p.checks.join(", ")}</div>
+        <span class="tiny faint">run before any review</span>
+      {:else if servicesWithChecks.length}
+        <div class="stat small">{servicesWithChecks.length} of {p.services.length} services</div>
+        <span class="tiny faint">{servicesWithChecks.map((s) => s.name).join(", ")}</span>
+      {:else}
+        <div class="stat small">none detected</div>
+        <span class="tiny faint">without these, nothing can tell if a change broke something</span>
+      {/if}
       <div style="margin-top:.6rem"><button onclick={() => run("gate", "Running the project checks")}>Run gate</button></div>
     </div>
 
@@ -183,6 +174,36 @@
     <div class="card {job.state === 'failed' ? 'bad-edge' : ''}" style="margin-bottom:1.25rem">
       <h2>{job.title ?? jobLabel}</h2>
       <Stepper steps={job.steps} state={job.state} error={job.error} />
+    </div>
+  {/if}
+
+  {#if p.services.length}
+    <div class="card" style="margin-bottom:1.25rem">
+      <div class="spread">
+        <h2 style="margin:0">Services</h2>
+        <span class="tiny faint">{p.services.length} repositories in this project</span>
+      </div>
+      <table style="margin-top:.5rem">
+        <tbody>
+          {#each p.services as svc}
+            <tr>
+              <td><a href={`/projects/${svc.key}`} onclick={(e) => openService(e, svc)}>{svc.name}</a></td>
+              <td class="tiny muted">
+                {#if svc.branch}<span class="pill">{svc.branch}</span>{/if}
+                {#if svc.indexed}<span class="pill good">{svc.symbols.toLocaleString()} symbols</span>
+                {:else if svc.needsIndex}<span class="pill warn">graph built, not indexed</span>
+                {:else}<span class="pill warn">no graph</span>{/if}
+                {#if svc.checks.length}<span class="pill">{svc.checks.join(", ")}</span>
+                {:else}<span class="pill warn">no checks</span>{/if}
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+      <p class="tiny faint" style="margin:.75rem 0 0">
+        Building the graph here builds one per service and the project totals them.
+        Open a service to work inside it alone.
+      </p>
     </div>
   {/if}
 
@@ -246,7 +267,6 @@
 
 <style>
   .flow { margin-top: .9rem; border-top: 1px solid var(--line); padding-top: .9rem; }
-  .notice { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
   .bad-edge { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
   /* Wrapped rather than scrolled: the whole point of showing the prompt is
      that someone reads it before it runs, and a horizontal scrollbar is where

@@ -87,9 +87,12 @@
           <div class="row tiny muted">
             {#if p.branch}<span class="pill">{p.branch}</span>{/if}
             {#if p.hasBmad}<span class="pill">bmad</span>{/if}
-            {#if p.graph}<span class="pill">{p.graph.symbols} symbols</span>
+            {#if p.workspace}<span class="pill">{p.services.length} services</span>{/if}
+            {#if p.graph}<span class="pill">{p.graph.symbols.toLocaleString()} symbols</span>
             {:else}<span class="pill warn">no graph</span>{/if}
             {#if p.checks.length}<span class="pill">{p.checks.join(", ")}</span>
+            {:else if p.services?.some((s) => s.checks.length)}
+              <span class="pill">checks in {p.services.filter((s) => s.checks.length).length} service(s)</span>
             {:else}<span class="pill warn">no checks</span>{/if}
             {#if p.tasks}<span class="pill">{p.tasks} task(s)</span>{/if}
             {#if p.streams}<span class="pill">{p.streams} stream(s)</span>{/if}

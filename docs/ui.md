@@ -94,13 +94,22 @@ Everything about one codebase on one page.
 Anything that takes time runs as a job with the same live progress as the
 setup wizard.
 
-If a card cannot do its job it says why rather than sitting at "none". The
-common one is adding a folder that holds repositories instead of a repository:
-a graph and a set of checks belong to each repo, so building at the level above
-them never changes anything. The interface detects that and offers the
-repositories by name.
+**A project is a workspace; the repositories inside it are services.** That is
+the shape BMAD assumes — it installs at the project level and its documents
+describe the system across services — and the interface follows it. A project's
+graph is the union of its services' graphs, its checks are the checks its
+services declare, and a Services panel shows each one with its own state:
 
-![A workspace folder, explained](images/workspace-notice.png)
+![A project with three services](images/workspace.png)
+
+Building the graph from the project builds one per service, correctly: mixing
+several codebases into a single index produces something too muddled to answer
+anything. The project then totals them, and `code_context` asked at the project
+level searches across all of them. Open a service to work inside it alone.
+
+If a card cannot do its job it says why rather than sitting at "none" —
+`uv` missing, a service whose graph was built before the index existed, or a
+folder that has no repositories in it yet.
 
 ### Start work
 
