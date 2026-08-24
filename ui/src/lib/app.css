@@ -39,6 +39,7 @@ code, .mono { font-family: var(--mono); font-size: .86em; }
 nav.side {
   width: 210px; flex: none; border-right: 1px solid var(--line);
   padding: 1.25rem 0; background: var(--panel); position: sticky; top: 0; height: 100vh;
+  display: flex; flex-direction: column;
 }
 nav.side .brand { padding: 0 1.25rem 1.25rem; font-weight: 650; letter-spacing: .02em; }
 nav.side .brand span { color: var(--ink-faint); font-weight: 400; display: block; font-size: .78rem; }

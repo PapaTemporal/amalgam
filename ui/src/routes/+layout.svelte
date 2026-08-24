@@ -1,6 +1,7 @@
 <script>
   import "$lib/app.css";
   import { page } from "$app/state";
+  import InstallChip from "$lib/InstallChip.svelte";
   let { children } = $props();
 
   const links = [
@@ -18,6 +19,11 @@
     {#each links as l}
       <a href={l.href} class:on={on(l.href)}>{l.label}</a>
     {/each}
+    <div class="foot"><InstallChip /></div>
   </nav>
   <main>{@render children()}</main>
 </div>
+
+<style>
+  .foot { margin-top: auto; padding: 1rem 1.25rem 0; }
+</style>

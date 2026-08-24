@@ -9,7 +9,7 @@ Everything below can be done from a screen or from a terminal. Neither is the
 
 | | |
 |---|---|
-| **`amalgam ui`** | Setup wizards with live progress, project dashboards, metrics, and buttons that compose a context-loaded prompt. Nothing to install: it ships compiled. See **[the interface](ui.md)**. |
+| **`amalgam ui`** | Project dashboards, a graph and flow map, metrics, setup and update, and buttons that compose a context-loaded prompt. Everything the CLI does, and nothing to install: it ships compiled. See **[the interface](ui.md)**. |
 | **The CLI** | Every capability as a command. Scriptable, remote-friendly, no browser. That is the path this page follows. |
 
 If you would rather click than type, run `amalgam ui` after step 0 below and

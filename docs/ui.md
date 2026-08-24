@@ -43,9 +43,15 @@ Underneath, the state of this machine: Node version, whether semantic recall
 and the local model are installed, whether the model is running right now and
 how long before it shuts itself down, and which agent CLIs were found.
 
-The **×** on a card takes a project off the list. It removes nothing else:
-no files, no graph, no memory, no work items — the entry simply stops
-appearing. The same control is on the project page.
+The **×** on a card removes a project. By default it removes only the list
+entry: no files, no graph, no memory, no work items — it simply stops
+appearing. Before anything happens you are shown what else is there, with
+sizes, and can tick any of it to be deleted too — the code graph, the planning
+workflows and their output, the agent wiring, the recorded work items.
+**Repositories are never touched, whatever you tick.** The same control is on
+the project page.
+
+![Removing a project](images/remove-project.png)
 
 Opening a **service** from a project shows it in place rather than adding it to
 the list, since a service belongs to its project and looking at something
@@ -53,7 +59,11 @@ should not change what you have chosen to track.
 
 ### Setup
 
-Two wizards, both showing their work.
+There is no page asking which kind of setup you meant — that question only has
+an answer the first time. The state of the install is a chip at the bottom of
+the sidebar, showing the version when everything is in place and turning amber
+or red when it is not: not deployed, not wired, or a newer version sitting in
+your clone waiting to be deployed. Click it to get here.
 
 **This machine** installs amalgam, wires it for every project, and puts
 `amalgam` on your PATH. The two optional downloads are checkboxes with their
@@ -66,20 +76,47 @@ never looks like a hang:
 
 ![The machine set up](images/setup-machine-done.png)
 
-**A project** starts by asking which folder. The chooser lists real directories
-from your machine and marks which are already git repositories or already have
-BMAD — no typing paths:
+Once installed, the same button becomes **Reinstall over the top** — the way
+to repair a deployed copy that has drifted. It overwrites what is deployed and
+leaves your memory database and projects alone.
+
+**Update** is beside it, and runs `amalgam update`: pull the latest source,
+re-deploy it, refresh the wiring in every project that was wired. The built
+pages are part of the repository, so this updates the interface as well — which
+is the reason it can live here at all. It tells you first if the pull will be
+skipped because there is uncommitted work in the clone, and afterwards offers
+to reload, since the pages you are looking at came from the version that was
+just replaced.
+
+Everything on this page is an `amalgam` command shown as it runs. The first
+time still comes from a terminal — you need a clone before there is a UI to
+click — but from then on either works.
+
+**A project** is one wizard whether or not it exists yet, because the only
+difference is what the folder already contains. It starts by asking which
+folder: the chooser lists real directories from your machine and marks which
+are already git repositories or already have BMAD — no typing paths. A **new**
+project must land on an empty folder, or a name you type to create one, since
+dropping a workspace on top of an existing tree produces something nobody can
+reason about later:
 
 ![Choosing a project folder](images/setup-picker.png)
 
-Then it initialises git if needed, installs the BMAD workflows, wires amalgam
-in, and builds the code graph:
+Then it asks what is in it. Clone a repository you already have, or start an
+empty one and it runs `git init` for you — as many as the project needs:
 
-![A project set up](images/setup-project-done.png)
+![Adding repositories to a project](images/setup-services.png)
+
+**Set up this project** does the rest in one go: installs the planning
+workflows, wires amalgam in, builds a code graph for every repository, and
+works out the links between them. That is the whole definition of ready, so
+there is nothing left to run by hand afterwards.
 
 A step that fails stops the sequence, because the steps after it assume it
 worked, and its last lines of output are shown in place so you can see why
-without going to look for a log.
+without going to look for a log:
+
+![A project set up](images/setup-project-done.png)
 
 ### A project
 
@@ -109,6 +146,14 @@ graph is the union of its services' graphs, its checks are the checks its
 services declare, and a Services panel shows each one with its own state:
 
 ![A project with three services](images/workspace.png)
+
+The Services panel is also where a project grows. **Add a repository** clones
+one you already have or creates an empty one and runs `git init` in it, and
+**Rebuild graph and links** re-runs the graph and the contract scan across
+every service — which happens automatically after an add, because a repository
+nothing has indexed is not yet part of the project. An empty workspace shows
+the same panel, since a project with nothing in it is exactly the one that
+needs it.
 
 Building the graph from the project builds one per service, correctly: mixing
 several codebases into a single index produces something too muddled to answer

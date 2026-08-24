@@ -1,6 +1,7 @@
 <script>
   import { get, post, relative } from "$lib/api.js";
   import Picker from "$lib/Picker.svelte";
+  import RemoveProject from "$lib/RemoveProject.svelte";
 
   let state = $state(null);
   let error = $state(null);
@@ -14,17 +15,14 @@
   const ready = $derived(state && state.embeddings !== undefined);
   const needsSetup = $derived(state && state.projects.length === 0);
 
-  async function remove(event, project) {
-    // Deliberately explicit about what this does not do: the fear that stops
-    // people tidying a list is that removing an entry deletes their work.
+  // Which project is being removed, if any. The dialog shows what would go
+  // before anything does.
+  let removing = $state(null);
+
+  function remove(event, project) {
     event.preventDefault();
     event.stopPropagation();
-    if (!confirm(`Remove "${project.name}" from the project list?
-
-Nothing on disk is touched — no files, no graph, no memory. It only stops appearing here.`)) return;
-    await post("/projects/remove", { key: project.key });
-    state = null;
-    load();
+    removing = project;
   }
 
   async function add(path) {
@@ -70,18 +68,26 @@ Nothing on disk is touched — no files, no graph, no memory. It only stops appe
     <div class="card empty">
       <p>No projects yet. Point amalgam at a codebase to begin.</p>
       <div class="row" style="justify-content:center">
-        <button class="primary" onclick={() => (picking = true)}>Add a project</button>
-        <a class="btn" href="/setup?new=1">Start something new</a>
+        <a class="btn primary" href="/setup/project">Add a project</a>
+        <a class="btn" href="/setup/project?new">Start something new</a>
       </div>
     </div>
   {:else}
     <div class="spread" style="margin-bottom:1rem">
       <span class="label">{state.projects.length} project(s)</span>
       <div class="row">
-        <button onclick={() => (picking = !picking)}>{picking ? "Cancel" : "Add a project"}</button>
-        <a class="btn" href="/setup?new=1">New project</a>
+        <a class="btn" href="/setup/project">Add a project</a>
+        <a class="btn" href="/setup/project?new">New project</a>
       </div>
     </div>
+
+    {#if removing}
+      <div style="margin-bottom:1rem">
+        <RemoveProject projectKey={removing.key} name={removing.name}
+          ondone={() => { removing = null; state = null; load(); }}
+          oncancel={() => (removing = null)} />
+      </div>
+    {/if}
 
     {#if picking}
       <div style="margin-bottom:1rem"><Picker onpick={add} /></div>

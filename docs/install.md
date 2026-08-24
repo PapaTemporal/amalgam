@@ -217,6 +217,13 @@ The deployed copy is behind this source. Run: amalgam update
 Installed with npx rather than a clone? Re-run the same npx command — it
 fetches the latest each time.
 
+The interface can do all of this too. `amalgam ui` → **Setup** has an update
+button that runs exactly the command above, and a chip in the sidebar goes
+amber when the deployed copy is behind your clone. Because the built pages are
+committed to the repository, an update updates the interface along with
+everything else — so the terminal is needed for the first install and optional
+after it.
+
 ## Non-Windows machines
 
 The MCP server and CLI are cross-platform, but the pinned runtime downloads

@@ -1,6 +1,7 @@
 <script>
   import { get, post, watchJob } from "$lib/api.js";
   import Stepper from "$lib/Stepper.svelte";
+import RemoveProject from "$lib/RemoveProject.svelte";
   import { page } from "$app/state";
 
   const key = $derived(page.params.key);
@@ -62,12 +63,42 @@
     await load();
   }
 
-  async function removeProject() {
-    if (!confirm(`Remove "${p.name}" from the project list?
+  // Deep-linkable the same way the map's flows are, so "here is what removing
+  // this would delete" can be sent to somebody rather than described.
+  let removing = $state(page.url.searchParams.get("remove") !== null);
 
-Nothing on disk is touched — no files, no graph, no memory. It only stops appearing here.`)) return;
-    await post("/projects/remove", { key });
-    location.href = "/";
+  // Adding repositories to a project that already exists: the same two ways as
+  // the wizard, because a project grows after it is created.
+  let addKind = $state(null);
+  let cloneUrl = $state("");
+  let newName = $state("");
+
+  async function addRepo() {
+    const body = addKind === "clone"
+      ? { project: p.path, url: cloneUrl.trim() }
+      : { project: p.path, name: newName.trim() };
+    jobLabel = "Adding a repository";
+    job = { state: "running", steps: [] };
+    const { jobId } = await post("/service/add", body);
+    watchJob(jobId, async (u) => {
+      job = u;
+      if (u.state === "done") {
+        // A new repository is not part of the project until it has been
+        // graphed and the links re-checked, so that follows immediately.
+        addKind = null; cloneUrl = ""; newName = "";
+        await refreshEverything();
+      }
+    });
+  }
+
+  async function refreshEverything() {
+    jobLabel = "Bringing the project up to date";
+    job = { state: "running", steps: [] };
+    const { jobId } = await post("/run", { what: "refresh", path: p.path });
+    watchJob(jobId, async (u) => {
+      job = u;
+      if (u.state === "done" || u.state === "failed") { data = null; await load(); }
+    });
   }
 
   async function startFlow(kind) {
@@ -116,11 +147,18 @@ Nothing on disk is touched — no files, no graph, no memory. It only stops appe
         {#if p.branch}<span class="pill">{p.branch}</span>{/if}
         {#if p.dirtyFiles > 0}<span class="pill warn">{p.dirtyFiles} uncommitted</span>{/if}
         {#if !p.viewingService}
-          <button class="ghost danger" onclick={removeProject}>Remove from list</button>
+          <button class="ghost danger" onclick={() => (removing = true)}>Remove…</button>
         {/if}
       </div>
     </div>
   </header>
+
+  {#if removing}
+    <div style="margin-bottom:1.25rem">
+      <RemoveProject projectKey={key} name={p.name}
+        ondone={() => (location.href = "/")} oncancel={() => (removing = false)} />
+    </div>
+  {/if}
 
   <!-- What the agent can be asked to do. The three shapes of work people
        actually start: something new, something already specified, or a look
@@ -225,13 +263,20 @@ Nothing on disk is touched — no files, no graph, no memory. It only stops appe
     </div>
   {/if}
 
-  {#if p.services.length}
+  {#if p.services.length || (p.exists && !p.isRepo)}
     <div class="card" style="margin-bottom:1.25rem">
       <div class="spread">
         <h2 style="margin:0">Services</h2>
-        <span class="tiny faint">{p.services.length} repositories in this project</span>
+        <span class="tiny faint">
+          {p.services.length ? `${p.services.length} repositories in this project` : "no repositories yet"}
+        </span>
       </div>
-      <table style="margin-top:.5rem">
+      {#if !p.services.length}
+        <p class="tiny muted" style="margin:.5rem 0 0">
+          This project is an empty workspace. Clone a repository into it, or start an empty one.
+        </p>
+      {/if}
+      <table style="margin-top:.5rem" class:hidden={!p.services.length}>
         <tbody>
           {#each p.services as svc}
             <tr>
@@ -248,6 +293,32 @@ Nothing on disk is touched — no files, no graph, no memory. It only stops appe
           {/each}
         </tbody>
       </table>
+      <div class="row" style="margin-top:.75rem">
+        <button onclick={() => (addKind = addKind ? null : "clone")}>Add a repository</button>
+        <button class="ghost" onclick={refreshEverything}>Rebuild graph and links</button>
+      </div>
+
+      {#if addKind}
+        <div class="addrepo">
+          <div class="row">
+            <button class:primary={addKind === "clone"} onclick={() => (addKind = "clone")}>Clone existing</button>
+            <button class:primary={addKind === "create"} onclick={() => (addKind = "create")}>Create empty</button>
+          </div>
+          {#if addKind === "clone"}
+            <div class="row">
+              <input type="text" bind:value={cloneUrl} placeholder="https://github.com/you/service.git" />
+              <button class="primary" onclick={addRepo} disabled={!cloneUrl.trim()}>Clone</button>
+            </div>
+          {:else}
+            <div class="row">
+              <input type="text" bind:value={newName} placeholder="api-server" />
+              <button class="primary" onclick={addRepo} disabled={!newName.trim()}>Create</button>
+            </div>
+          {/if}
+          <span class="tiny faint">The graph and the links between services are rebuilt straight after.</span>
+        </div>
+      {/if}
+
       <p class="tiny faint" style="margin:.75rem 0 0">
         Building the graph here builds one per service and the project totals them.
         Open a service to work inside it alone.
@@ -314,6 +385,9 @@ Nothing on disk is touched — no files, no graph, no memory. It only stops appe
 {/if}
 
 <style>
+  table.hidden { display: none; }
+  .addrepo { display: flex; flex-direction: column; gap: .5rem; margin-top: .75rem;
+             border-top: 1px solid var(--line); padding-top: .75rem; }
   .flow { margin-top: .9rem; border-top: 1px solid var(--line); padding-top: .9rem; }
   .bad-edge { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
   /* Wrapped rather than scrolled: the whole point of showing the prompt is

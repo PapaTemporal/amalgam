@@ -53,23 +53,47 @@
   const W = 760;
   // Height follows the layout: a single service in a 320-tall canvas is mostly
   // empty space, and empty space reads as something failing to load.
-  const H = $derived((map?.nodes.length ?? 1) <= 2 ? 170 : 320);
+  // Room for the self-loop, which is drawn above the node and was reaching off
+  // the top of the canvas in the single-service case — the case every project
+  // starts in.
+  const H = $derived((map?.nodes.length ?? 1) <= 2 ? 200 : 320);
   const positions = $derived.by(() => {
     const nodes = map?.nodes ?? [];
     const pos = new Map();
-    if (nodes.length === 1) pos.set(nodes[0].id, { x: W / 2, y: H / 2 });
+    if (nodes.length === 1) pos.set(nodes[0].id, { x: W / 2, y: H / 2 + 30 });
     else if (nodes.length === 2) {
-      pos.set(nodes[0].id, { x: 170, y: H / 2 });
-      pos.set(nodes[1].id, { x: W - 170, y: H / 2 });
+      pos.set(nodes[0].id, { x: 170, y: H / 2 + 20 });
+      pos.set(nodes[1].id, { x: W - 170, y: H / 2 + 20 });
     } else {
-      const r = Math.min(W, H) / 2 - 70;
+      // An ellipse, not a circle: the boxes are 156 wide and 44 tall, so a
+      // radius that fits them vertically leaves them overlapping horizontally.
+      // Spreading across the axis with room in it keeps the lines between the
+      // boxes rather than under them.
+      const rx = W / 2 - 110, ry = H / 2 - 55;
       nodes.forEach((n, i) => {
         const a = (i / nodes.length) * Math.PI * 2 - Math.PI / 2;
-        pos.set(n.id, { x: W / 2 + r * Math.cos(a), y: H / 2 + r * Math.sin(a) });
+        pos.set(n.id, { x: W / 2 + rx * Math.cos(a), y: H / 2 + ry * Math.sin(a) });
       });
     }
     return pos;
   });
+
+  // Boxes are drawn at these half-extents, and the edges need to know: a line
+  // that runs to a node's centre puts its arrowhead underneath the box, which
+  // loses the one thing the diagram exists to show — which way the call goes.
+  const BW = 78, BH = 22;
+
+  /** Where a line aimed at `to` should stop: the edge of the box, not its middle. */
+  function clip(from, to, pad = 7) {
+    const dx = to.x - from.x, dy = to.y - from.y;
+    if (!dx && !dy) return to;
+    // Scale the direction until it first leaves the box in x or in y.
+    const t = Math.min(
+      Math.abs(dx) > 1e-6 ? (BW + pad) / Math.abs(dx) : Infinity,
+      Math.abs(dy) > 1e-6 ? (BH + pad) / Math.abs(dy) : Infinity,
+    );
+    return { x: to.x - dx * t, y: to.y - dy * t };
+  }
 
   // A self-link is drawn as a loop above the node: a service calling its own
   // routes is the single-repository case and must not vanish.
@@ -77,8 +101,9 @@
     const a = positions.get(link.from), b = positions.get(link.to);
     if (!a || !b) return "";
     if (link.from === link.to) return `M ${a.x - 26} ${a.y - 22} C ${a.x - 70} ${a.y - 96}, ${a.x + 70} ${a.y - 96}, ${a.x + 26} ${a.y - 22}`;
+    const start = clip(b, a), end = clip(a, b);
     const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2 - 30;
-    return `M ${a.x} ${a.y} Q ${mx} ${my} ${b.x} ${b.y}`;
+    return `M ${start.x} ${start.y} Q ${mx} ${my} ${end.x} ${end.y}`;
   }
 </script>
 
@@ -118,7 +143,7 @@
           {@const b = positions.get(link.to)}
           <text class="link-label"
                 x={link.from === link.to ? a.x : (a.x + b.x) / 2}
-                y={link.from === link.to ? a.y - 78 : (a.y + b.y) / 2 - 34}>
+                y={link.from === link.to ? a.y - 78 : (a.y + b.y) / 2 - 20}>
             {link.count} route{link.count === 1 ? "" : "s"}
           </text>
         {/if}
@@ -232,7 +257,8 @@
 <style>
   svg.map { width: 100%; height: auto; margin-bottom: .5rem; }
   .link { fill: none; stroke: var(--accent); stroke-width: 1.5; opacity: .55; }
-  .link-label { fill: var(--ink-faint); font-size: 11px; text-anchor: middle; }
+  .link-label { fill: var(--ink-faint); font-size: 11px; text-anchor: middle;
+                paint-order: stroke; stroke: var(--panel); stroke-width: 4px; stroke-linejoin: round; }
   .node rect { fill: var(--panel-2); stroke: var(--line); }
   .node .name { fill: var(--ink); font-size: 13px; font-weight: 600; text-anchor: middle; }
   .node .meta { fill: var(--ink-faint); font-size: 10px; text-anchor: middle; }
