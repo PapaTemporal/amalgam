@@ -29,6 +29,11 @@
     });
   }
 
+  async function addService(servicePath) {
+    const added = await post("/projects/add", { path: servicePath });
+    location.href = `/projects/${added.project.key}`;
+  }
+
   async function startFlow(kind) {
     flow = await post("/flow/compose", { key, flow: kind });
     copied = false;
@@ -71,6 +76,26 @@
     </div>
   </header>
 
+  {#if p.isWorkspace}
+    <!-- The failure that looks like a bug: a folder holding repositories is
+         not a project, so a graph never appears there however many times the
+         button is pressed, and no checks are found either. Say it plainly and
+         offer the thing that does work. -->
+    <div class="card notice" style="margin-bottom:1.25rem">
+      <strong>This folder holds {p.services.length} repositories — it is not a project itself.</strong>
+      <p class="tiny muted" style="margin:.4rem 0 .75rem">
+        A code graph and a set of checks belong to each repository, not to the folder above them.
+        That is why building a graph here never changes anything, and why no checks were detected.
+        Add the repositories instead:
+      </p>
+      <div class="row">
+        {#each p.services as svc}
+          <button onclick={() => addService(svc.path)}>{svc.name}</button>
+        {/each}
+      </div>
+    </div>
+  {/if}
+
   <!-- What the agent can be asked to do. The three shapes of work people
        actually start: something new, something already specified, or a look
        at what is already there. -->
@@ -109,16 +134,22 @@
         <span class="tiny faint">{p.graph.edges} edges · indexed {p.graph.importedAt}</span>
       {:else}
         <div class="stat small">none</div>
-        <span class="tiny faint">code search and impact need this</span>
+        <span class="tiny faint">{p.graphBlocked ?? "code search and impact need this"}</span>
       {/if}
-      <div style="margin-top:.6rem"><button onclick={() => run("graph", "Building the code graph")}>Build</button></div>
+      <div style="margin-top:.6rem">
+        <button disabled={!!p.graphBlocked} onclick={() => run("graph", "Building the code graph")}>
+          {p.graph ? "Rebuild" : "Build"}
+        </button>
+      </div>
     </div>
 
     <div class="card">
       <span class="label">Checks</span>
       <div class="stat small">{p.checks.length ? p.checks.join(", ") : "none detected"}</div>
       <span class="tiny faint">
-        {p.checks.length ? "run before any review" : "without these, nothing can tell if a change broke something"}
+        {p.checks.length ? "run before any review"
+          : p.isWorkspace ? "checks live in each repository, not here"
+          : "without these, nothing can tell if a change broke something"}
       </span>
       <div style="margin-top:.6rem"><button onclick={() => run("gate", "Running the project checks")}>Run gate</button></div>
     </div>
@@ -149,8 +180,8 @@
   </div>
 
   {#if job}
-    <div class="card" style="margin-bottom:1.25rem">
-      <h2>{jobLabel}</h2>
+    <div class="card {job.state === 'failed' ? 'bad-edge' : ''}" style="margin-bottom:1.25rem">
+      <h2>{job.title ?? jobLabel}</h2>
       <Stepper steps={job.steps} state={job.state} error={job.error} />
     </div>
   {/if}
@@ -215,6 +246,8 @@
 
 <style>
   .flow { margin-top: .9rem; border-top: 1px solid var(--line); padding-top: .9rem; }
+  .notice { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
+  .bad-edge { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
   /* Wrapped rather than scrolled: the whole point of showing the prompt is
      that someone reads it before it runs, and a horizontal scrollbar is where
      reading stops. */

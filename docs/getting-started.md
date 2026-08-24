@@ -241,6 +241,8 @@ RUNTIME  memory=sqlite (no service) model=installed
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| No graph and no checks, and Build changes nothing | You added a folder that *holds* repositories, not a repository | Add the repositories themselves — the interface offers them by name |
+| `amalgam graph` fails or the Build button is disabled | `uv` is not installed | Install [uv](https://docs.astral.sh/uv/); graphify runs through it |
 | The agent never uses the tools | Session started before wiring | Restart the session |
 | `code_context` says no graph | Never indexed | `amalgam graph` |
 | Retrieval finds nothing by meaning | No embedding model | `amalgam install --with-embeddings` |

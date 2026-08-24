@@ -94,6 +94,14 @@ Everything about one codebase on one page.
 Anything that takes time runs as a job with the same live progress as the
 setup wizard.
 
+If a card cannot do its job it says why rather than sitting at "none". The
+common one is adding a folder that holds repositories instead of a repository:
+a graph and a set of checks belong to each repo, so building at the level above
+them never changes anything. The interface detects that and offers the
+repositories by name.
+
+![A workspace folder, explained](images/workspace-notice.png)
+
 ### Start work
 
 Four buttons for the four shapes of work people actually begin:

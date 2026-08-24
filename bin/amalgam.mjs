@@ -286,6 +286,12 @@ async function cmdInstall(args) {
   fs.mkdirSync(HOME, { recursive: true });
   // 1) code payload → HOME (so project wiring never depends on where the repo clone lives)
   for (const dir of ["mcp", "skills", "lib", "hooks"]) copyDir(path.join(PKG, dir), path.join(HOME, dir));
+  // The compiled interface travels with the install, or `amalgam ui` run from
+  // anywhere but a source checkout serves nothing. Only the build output: the
+  // Svelte sources and their toolchain are a contributor's concern.
+  if (fs.existsSync(path.join(PKG, "ui", "build"))) {
+    copyDir(path.join(PKG, "ui", "build"), path.join(HOME, "ui", "build"));
+  }
   console.log(`Code payload copied to ${HOME}`);
 
   // 2) fetch + extract runtimes/model
