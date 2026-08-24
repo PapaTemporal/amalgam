@@ -147,6 +147,41 @@ Then, depending on what your machine has:
 Both are fine. The second is exactly how BMAD works today, and it is never
 worse than what you have now.
 
+### Map
+
+A code graph only knows connections written as symbols. When one component
+talks to another through a **string** — an HTTP route, a queue topic — the
+parser sees a call to `fetch` and nothing more. This repository demonstrates it
+against itself: the client calls `/api/state`, the server defines it, and the
+graph holds zero edges between them.
+
+The map infers those edges from evidence and draws the result:
+
+![The project map](images/map.png)
+
+- **Services** — one box per repository, with the contracts between them as
+  arrows. A single-repository project shows one box and a loop, which is the
+  honest picture of a frontend calling its own backend.
+- **Contracts** — every route paired with the code that calls it, each with the
+  evidence behind it: a literal path meeting a literal route is strong, a
+  wrapper call matched by suffix is weaker, and both say so.
+- **Routes nothing calls** and **calls to nothing here** — dead endpoints, or
+  calls to a service outside this project.
+
+Click a contract to trace the flow end to end:
+
+![A flow traced end to end](images/flow-trace.png)
+
+Caller, the route it crosses, the handler that serves it, and what that handler
+goes on to call — which is the thing you actually want before changing an
+endpoint. Flows are deep-linkable (`?flow=/api/state`), so one can be sent to
+somebody rather than described.
+
+Refresh it with **Rescan**, or `amalgam contracts` from a terminal. These edges
+are inferred, never mixed into the parsed `calls` edges, and re-verified against
+the source before being shown — a match whose literal has since moved is
+dropped rather than reported.
+
 ### Metrics
 
 ![Metrics](images/metrics.png)

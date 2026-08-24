@@ -27,6 +27,8 @@ import { open as openDb } from "../lib/db.mjs";
 import { verifyFact } from "../lib/verify.mjs";
 import { check as runCheck, render as renderCheck } from "../lib/checks.mjs";
 import { runGate, renderGate, detectChecks } from "../lib/gates.mjs";
+import { contracts as findContracts, saveContracts, render as renderContracts } from "../lib/contracts.mjs";
+import { services as workspaceServices, isWorkspace } from "../lib/workspace.mjs";
 import { rank as rankRisk, render as renderSurvey } from "../lib/survey.mjs";
 import { analyse as analyseCollisions, render as renderCollisions } from "../lib/collide.mjs";
 import { isIndexed, graphFromDb } from "../lib/graphdb.mjs";
@@ -1606,6 +1608,22 @@ async function cmdUi(args) {
   });
 }
 
+// ================================================================ contracts
+/**
+ * The links a parser cannot see: one component calling another by name.
+ *
+ * Run at the project level, where both halves of a contract live. Stored, so
+ * the interface can draw them without re-reading the tree on every page load.
+ */
+async function cmdContracts(args) {
+  const { opts, words } = parseArgs(args);
+  const root = path.resolve(words[0] ?? process.cwd());
+  const svcs = isWorkspace(root) ? workspaceServices(root) : [];
+  const result = findContracts(root, svcs);
+  await saveContracts(root, result);
+  console.log(renderContracts(result, { limit: Number(opts.limit ?? 25) }));
+}
+
 // ---------------------------------------------------------------- dispatch
 const [cmd, ...rest] = process.argv.slice(2);
 switch (cmd) {
@@ -1621,6 +1639,7 @@ switch (cmd) {
   case "trace": await cmdTrace(rest); break;
   case "survey": await cmdSurvey(rest); break;
   case "collide": cmdCollide(rest); break;
+  case "contracts": await cmdContracts(rest); break;
   case "ui": await cmdUi(rest); break;
   case "wire": cmdWire(rest); break;
   case "stream": cmdStream(rest); break;
@@ -1665,6 +1684,8 @@ Usage:
                  [--run-checks]     seams, what to cover before touching
   amalgam collide [dir]             what parallel streams are about to do to
                                     each other, and the order to merge them
+  amalgam contracts [dir]           links the parser cannot see: which code
+                                    calls which route, across services
   amalgam ui [--port N] [--no-open] open the optional local interface: setup
                                     wizard, project dashboards, metrics
   amalgam stats                     measured tool usage — is any of this earning its keep?

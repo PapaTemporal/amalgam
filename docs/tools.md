@@ -66,6 +66,18 @@ still be the only answer — but you get to discount it.
 | `graph_query` | Structural questions: explain a symbol, find a path between two |
 
 ```bash
+amalgam contracts          # links the parser cannot see: who calls which route
+```
+
+**Contracts** are the second kind of edge: a parser only sees connections
+written as symbols, so a `fetch("/api/state")` meeting a route declared
+elsewhere is invisible to it. `amalgam contracts` infers those from string
+evidence across every service, stores them, and reports routes nobody calls and
+calls to routes nobody serves. They are kept separate from parsed edges and
+carry their confidence, because one is a fact about syntax and the other is a
+match between strings.
+
+```bash
 amalgam graph              # build/refresh, then index for search
 amalgam graph --check      # is it stale?
 amalgam graph --sql        # also parse .sql

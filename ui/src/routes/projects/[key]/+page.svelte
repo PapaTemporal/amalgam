@@ -123,10 +123,11 @@
         <div class="stat small">none</div>
         <span class="tiny faint">{p.graphBlocked ?? "code search and impact need this"}</span>
       {/if}
-      <div style="margin-top:.6rem">
+      <div class="row" style="margin-top:.6rem">
         <button disabled={!!p.graphBlocked} onclick={() => run("graph", "Building the code graph")}>
           {p.graph ? "Rebuild" : "Build"}
         </button>
+        <a class="btn" href={`/projects/${key}/map`}>Map</a>
       </div>
     </div>
 
