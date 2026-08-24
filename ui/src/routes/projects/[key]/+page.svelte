@@ -6,6 +6,7 @@
   const key = $derived(page.params.key);
 
   let data = $state(null);
+  let insight = $state(null);
   let error = $state(null);
   let job = $state(null);
   let jobLabel = $state("");
@@ -13,7 +14,15 @@
   let copied = $state(false);
 
   async function load() {
-    try { data = await get("/project", { key }); } catch (e) { error = e.message; }
+    try {
+      const q = service ? { key, service } : { key };
+      data = await get("/project", q);
+      // Stories and risk arrive behind the page rather than holding it up: on a
+      // large repository they take hundreds of times longer than everything
+      // else, and a dashboard that will not open is worse than one that fills in.
+      insight = null;
+      get("/insight", q).then((i) => (insight = i)).catch(() => (insight = { failed: true }));
+    } catch (e) { error = e.message; }
   }
   $effect(() => { if (key && !data && !error) load(); });
 
@@ -29,12 +38,36 @@
     });
   }
 
+  // Viewing a service does not add it to anything: it is looked at through the
+  // project it belongs to. Adding it silently was how people ended up with
+  // list entries they never chose.
+  let service = $state(page.url.searchParams.get("service"));
+
   async function openService(event, svc) {
-    // Registered on the way in, so a service can be opened straight from its
-    // project without being added by hand first.
     event.preventDefault();
-    const added = await post("/projects/add", { path: svc.path });
-    location.href = `/projects/${added.project.key}`;
+    service = svc.name;
+    data = null;
+    const url = new URL(window.location.href);
+    url.searchParams.set("service", svc.name);
+    history.replaceState({}, "", url);
+    await load();
+  }
+
+  async function backToProject() {
+    service = null;
+    data = null;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("service");
+    history.replaceState({}, "", url);
+    await load();
+  }
+
+  async function removeProject() {
+    if (!confirm(`Remove "${p.name}" from the project list?
+
+Nothing on disk is touched — no files, no graph, no memory. It only stops appearing here.`)) return;
+    await post("/projects/remove", { key });
+    location.href = "/";
   }
 
   async function startFlow(kind) {
@@ -60,7 +93,7 @@
   }
 
   const p = $derived(data?.project);
-  const unproven = $derived(data?.trace?.summary?.unproven ?? []);
+  const unproven = $derived(insight?.trace?.summary?.unproven ?? []);
   const servicesWithChecks = $derived((p?.services ?? []).filter((s) => s.checks.length));
 </script>
 
@@ -68,6 +101,12 @@
   <div class="card"><strong>{error}</strong><p class="tiny muted"><a href="/">Back to projects</a></p></div>
 {:else if data}
   <header class="page">
+    {#if p.viewingService}
+      <p class="tiny muted" style="margin:0 0 .35rem">
+        <button class="ghost tiny" onclick={backToProject}>← {p.parentName}</button>
+        <span class="faint">viewing one service — it is not on your project list</span>
+      </p>
+    {/if}
     <div class="spread">
       <div>
         <h1>{p.name}</h1>
@@ -76,6 +115,9 @@
       <div class="row">
         {#if p.branch}<span class="pill">{p.branch}</span>{/if}
         {#if p.dirtyFiles > 0}<span class="pill warn">{p.dirtyFiles} uncommitted</span>{/if}
+        {#if !p.viewingService}
+          <button class="ghost danger" onclick={removeProject}>Remove from list</button>
+        {/if}
       </div>
     </div>
   </header>
@@ -148,12 +190,17 @@
 
     <div class="card">
       <span class="label">Stories</span>
-      <div class="stat small">{data.trace.summary.stories}</div>
-      <span class="tiny faint">
-        {#if unproven.length}
-          <span style="color:var(--warn)">{unproven.length} done with no way to check them</span>
-        {:else if data.trace.summary.stories}all declare a check{:else}no specs found{/if}
-      </span>
+      {#if !insight}
+        <div class="stat small faint">…</div>
+        <span class="tiny faint">looking for specs</span>
+      {:else}
+        <div class="stat small">{insight.trace?.summary.stories ?? 0}</div>
+        <span class="tiny faint">
+          {#if unproven.length}
+            <span style="color:var(--warn)">{unproven.length} done with no way to check them</span>
+          {:else if insight.trace?.summary.stories}all declare a check{:else}no specs found{/if}
+        </span>
+      {/if}
       <div style="margin-top:.6rem"><button onclick={() => run("trace", "Verifying stories")}>Verify</button></div>
     </div>
 
@@ -208,15 +255,15 @@
     </div>
   {/if}
 
-  {#if data.risk}
+  {#if insight?.risk}
     <div class="card" style="margin-bottom:1.25rem">
       <h2>Riskiest files</h2>
       <p class="tiny faint" style="margin-top:-.4rem">
-        Churn × dependents over {data.risk.commits} commits. Read the reasons, not the order.
+        Churn × dependents over {insight.risk.commits} commits. Read the reasons, not the order.
       </p>
       <table>
         <tbody>
-          {#each data.risk.rows as r}
+          {#each insight.risk.rows as r}
             <tr>
               <td class="mono">{r.tested ? "" : "!"} {r.file}</td>
               <td class="tiny muted">{r.why.join(", ")}</td>
@@ -224,10 +271,10 @@
           {/each}
         </tbody>
       </table>
-      {#if data.risk.coupling.length}
+      {#if insight.risk.coupling.length}
         <h3 style="margin-top:1rem">Changes together but lives apart</h3>
         <ul class="tiny muted plain">
-          {#each data.risk.coupling as c}<li>{c.n}× &nbsp;{c.a} + {c.b}</li>{/each}
+          {#each insight.risk.coupling as c}<li>{c.n}× &nbsp;{c.a} + {c.b}</li>{/each}
         </ul>
       {/if}
     </div>

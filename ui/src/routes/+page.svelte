@@ -14,6 +14,19 @@
   const ready = $derived(state && state.embeddings !== undefined);
   const needsSetup = $derived(state && state.projects.length === 0);
 
+  async function remove(event, project) {
+    // Deliberately explicit about what this does not do: the fear that stops
+    // people tidying a list is that removing an entry deletes their work.
+    event.preventDefault();
+    event.stopPropagation();
+    if (!confirm(`Remove "${project.name}" from the project list?
+
+Nothing on disk is touched — no files, no graph, no memory. It only stops appearing here.`)) return;
+    await post("/projects/remove", { key: project.key });
+    state = null;
+    load();
+  }
+
   async function add(path) {
     picking = false;
     await post("/projects/add", { path });
@@ -79,6 +92,7 @@
         <a class="card link" href={`/projects/${p.key}`}>
           <div class="title">
             <strong>{p.name}</strong>
+            <button class="ghost danger remove" title="Remove from list" onclick={(e) => remove(e, p)}>×</button>
             {#if !p.exists}<span class="pill bad">missing</span>
             {:else if p.dirtyFiles > 0}<span class="pill warn">{p.dirtyFiles} uncommitted</span>
             {:else}<span class="pill good">clean</span>{/if}
@@ -124,3 +138,10 @@
     </div>
   </div>
 {/if}
+
+<style>
+  /* Present but quiet until the card is hovered: removing a project is a
+     deliberate act, not something to invite with a prominent button. */
+  .remove { border: none; padding: 0 .3rem; line-height: 1; font-size: 1.15rem; opacity: .3; }
+  .card:hover .remove { opacity: 1; }
+</style>

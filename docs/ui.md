@@ -43,6 +43,14 @@ Underneath, the state of this machine: Node version, whether semantic recall
 and the local model are installed, whether the model is running right now and
 how long before it shuts itself down, and which agent CLIs were found.
 
+The **×** on a card takes a project off the list. It removes nothing else:
+no files, no graph, no memory, no work items — the entry simply stops
+appearing. The same control is on the project page.
+
+Opening a **service** from a project shows it in place rather than adding it to
+the list, since a service belongs to its project and looking at something
+should not change what you have chosen to track.
+
 ### Setup
 
 Two wizards, both showing their work.
