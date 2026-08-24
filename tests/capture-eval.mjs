@@ -119,6 +119,13 @@ check("known secret shapes are redacted", leaked.length === 0,
 check("ordinary text is left alone",
   redact("The build must stay offline; see lib/db.mjs line 30.") === "The build must stay offline; see lib/db.mjs line 30.",
   "no over-redaction of normal prose");
+check("a URL path is not mistaken for a missing file",
+  verifyFact("the map is deep-linkable at /api/state").state === "unknown",
+  "an HTTP route reads exactly like a POSIX path; flagging it teaches people to ignore the warning");
+check("but a path whose root exists is still checked",
+  verifyFact(`the store is ${path.join(TMP, "definitely-not-here")}`).state === "stale",
+  "genuine drift still caught");
+
 check("a commit hash is not mistaken for a secret",
   redact("fixed in 0639110a1b2c3d4e5f60718293a4b5c6d7e8f900").includes("0639110a1b2c3d4e5f60718293a4b5c6d7e8f900"),
   "no blanket high-entropy rule");
