@@ -217,6 +217,28 @@ The deployed copy is behind this source. Run: amalgam update
 Installed with npx rather than a clone? Re-run the same npx command — it
 fetches the latest each time.
 
+### What an update does not bring with it
+
+Pulling code updates the code. Some things live on the machine rather than in
+the repository, and a second machine needs them separately:
+
+| | |
+|---|---|
+| The agent CLI, and being signed into it | `npm install -g @anthropic-ai/claude-code`, then `claude` once |
+| The interactive graph's drawing library | `amalgam vendor-graph` — one 686 KB copy, then it never needs the network |
+| A code graph and its diagram, per repository | `amalgam graph --label`, or **Rebuild** in the interface |
+| The embedding model and the local model | `amalgam install --with-embeddings --with-model` |
+
+`amalgam update` checks for all of these when it finishes and prints only what
+is actually missing, with the command that fixes it. A machine with nothing
+outstanding says so in one line.
+
+One case is worth calling out: a repository whose graph was built by a version
+with the indexing bugs in it has a `graphify-out/graph.json` on disk and
+nothing behind it in the index. It looks fine from the outside and reports no
+symbols. Rebuilding is the fix, and the update report names those repositories
+rather than leaving you to notice.
+
 The interface can do all of this too. `amalgam ui` → **Setup** has an update
 button that runs exactly the command above, and a chip in the sidebar goes
 amber when the deployed copy is behind your clone. Because the built pages are
