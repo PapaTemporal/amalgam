@@ -78,6 +78,22 @@ import RemoveProject from "$lib/RemoveProject.svelte";
 
   $effect(() => { if (!agent) get("/agent").then((a) => (agent = a)).catch(() => {}); });
 
+  // graphify's own interactive graph, if it has been built. Served rather than
+  // rebuilt: it is a good page and there is no reason to compete with it.
+  let pages = $state(null);
+  $effect(() => { if (key && !pages) get("/graphpages", { key }).then((g) => (pages = g)).catch(() => {}); });
+  const drawn = $derived((pages?.services ?? []).filter((s) => s.hasPage));
+
+  async function vendorGraph() {
+    jobLabel = "Making the graph work offline";
+    job = { state: "running", steps: [] };
+    const { jobId } = await post("/graphpages/vendor", {});
+    watchJob(jobId, async (u) => {
+      job = u;
+      if (u.state === "done") pages = await get("/graphpages", { key });
+    });
+  }
+
   async function runHere() {
     if (!flow) return;
     starting = true;
@@ -345,6 +361,35 @@ import RemoveProject from "$lib/RemoveProject.svelte";
     <div class="card {job.state === 'failed' ? 'bad-edge' : ''}" style="margin-bottom:1.25rem">
       <h2>{job.title ?? jobLabel}</h2>
       <Stepper steps={job.steps} status={job.state} error={job.error} />
+    </div>
+  {/if}
+
+  {#if drawn.length}
+    <div class="card" style="margin-bottom:1.25rem">
+      <div class="spread">
+        <div>
+          <span class="label">Interactive graph</span>
+          <p class="tiny muted" style="margin:.35rem 0 0">
+            graphify's own view: every symbol a node, coloured by the community it belongs to,
+            with a sidebar to filter and search. Built when the graph is.
+          </p>
+        </div>
+        {#if pages && !pages.vendored && drawn.some((d) => d.needsNetwork)}
+          <button onclick={vendorGraph}>Make it work offline</button>
+        {/if}
+      </div>
+      <div class="row" style="margin-top:.7rem;flex-wrap:wrap">
+        {#each drawn as d}
+          <a class="btn" target="_blank" rel="noreferrer"
+             href={`/graph/${key}${p.workspace ? `/${d.service}` : ""}`}>{d.service}</a>
+        {/each}
+      </div>
+      {#if pages && !pages.vendored && drawn.some((d) => d.needsNetwork)}
+        <p class="tiny faint" style="margin:.6rem 0 0">
+          The page draws with a library it fetches from the internet, so it is blank offline.
+          One 600 KB download keeps a copy here and it never needs the network again.
+        </p>
+      {/if}
     </div>
   {/if}
 

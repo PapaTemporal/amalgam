@@ -668,7 +668,7 @@ function graphStaleness(repo) {
   return { builtAt, commits: out ? out.split("\n").filter(Boolean).length : 0 };
 }
 
-function buildOneGraph(dir, { sql = false } = {}) {
+function buildOneGraph(dir, { sql = false, label = false } = {}) {
   console.log(`\n=== ${path.basename(dir)} — building code graph (tree-sitter, local, no LLM)`);
   // graphify's own hint says `pip install graphifyy[sql]`, which does not apply
   // here: it runs through uv in an ephemeral environment, so the extra belongs
@@ -682,7 +682,63 @@ function buildOneGraph(dir, { sql = false } = {}) {
     return false;
   }
   console.log(`  graph -> ${path.join(dir, GRAPH_REL)}`);
+  clusterOneGraph(dir, { label });
   return true;
+}
+
+/**
+ * Cluster the graph, which is also what writes graphify's own report and its
+ * interactive page.
+ *
+ * Extraction stops at nodes and edges. The communities — the neighbourhoods a
+ * codebase actually divides into — come from a second pass, and so do
+ * GRAPH_REPORT.md and graph.html. Skipping it left every graph amalgam built
+ * without the one view that shows a codebase as a shape, which is the thing
+ * people open a graph tool to see.
+ *
+ * Community naming is deliberately not asked for: it wants a model, and
+ * `--no-label` leaves deterministic ids that amalgam names itself, from the
+ * hub each community is built around. No key, no call, same answer twice.
+ */
+function clusterOneGraph(dir, { label = false } = {}) {
+  const nodes = countNodes(dir);
+  // graphify's own guidance: past a few thousand nodes the interactive page is
+  // no longer something a browser enjoys, and the clustering is worth having
+  // without it.
+  const heavy = nodes > 5000;
+  const args = ["tool", "run", "--from", "graphifyy", "graphify", "cluster-only", "."];
+  const env = { ...process.env };
+
+  // Naming the communities is the difference between a legend that reads
+  // "Community 0" and one that reads "APIRouter" — the same picture, and only
+  // one of them tells you anything. It takes a model, and graphify will talk
+  // to any OpenAI-shaped endpoint, so it is pointed at the local one rather
+  // than at somebody's cloud. Off by default: it is slower than the rest of
+  // the build and nothing depends on it.
+  if (label) {
+    args.push("--backend=openai", `--model=${MODEL_FILE}`, "--max-concurrency=1");
+    env.OPENAI_BASE_URL = `http://127.0.0.1:${LLAMA_PORT}/v1`;
+    env.OPENAI_MODEL = MODEL_FILE;
+    // llama.cpp does not check it, and graphify refuses to start without one.
+    env.OPENAI_API_KEY = env.OPENAI_API_KEY ?? "local";
+  } else {
+    args.push("--no-label");
+  }
+  if (heavy) args.push("--no-viz");
+  const r = spawnSync("uv", args, { cwd: dir, encoding: "utf8", windowsHide: true, env });
+  if (r.status !== 0) {
+    console.log(`  no communities: ${(r.stderr ?? "").split("\n").find(Boolean) ?? "clustering failed"}`);
+    return false;
+  }
+  console.log(`  communities -> ${heavy ? "clustered (page skipped, too large to draw)" : "clustered, graph.html written"}${label ? ", named locally" : ""}`);
+  return true;
+}
+
+/** How big the graph is, for deciding whether a browser should be asked to draw it. */
+function countNodes(dir) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(dir, GRAPH_REL), "utf8")).nodes?.length ?? 0;
+  } catch { return 0; }
 }
 
 /**
@@ -754,6 +810,12 @@ async function cmdGraph(args) {
   const check = args.includes("--check");
   const includeNonGit = args.includes("--all");
   const sql = args.includes("--sql");
+  // Naming communities needs the local model up; asking for it without one
+  // installed would just wait and then fail.
+  const label = args.includes("--label") && modelInstalled();
+  if (args.includes("--label") && !label) {
+    console.log("(--label needs the local model: amalgam install --with-model)\n");
+  }
   const cwd = path.resolve(process.cwd());
 
   // An explicit path is taken literally — no workspace expansion.
@@ -764,7 +826,7 @@ async function cmdGraph(args) {
       process.exit(1);
     }
     if (check) return reportStaleness(target, path.basename(target));
-    if (!buildOneGraph(target, { sql })) process.exit(1);
+    if (!buildOneGraph(target, { sql, label })) process.exit(1);
     if (!(await indexOneGraph(target))) {
       console.error(`\nThe graph was built but could not be indexed, so nothing can search it yet.`);
       process.exit(1);
@@ -778,7 +840,7 @@ async function cmdGraph(args) {
 
   if (!isWorkspace) {
     if (check) return reportStaleness(cwd, path.basename(cwd));
-    if (!buildOneGraph(cwd, { sql })) process.exit(1);
+    if (!buildOneGraph(cwd, { sql, label })) process.exit(1);
     if (!(await indexOneGraph(cwd))) {
       console.error(`\nThe graph was built but could not be indexed, so nothing can search it yet.`);
       process.exit(1);
@@ -804,7 +866,7 @@ async function cmdGraph(args) {
   let failures = 0;
   const unindexed = [];
   for (const s of targets) {
-    if (!buildOneGraph(s.path, { sql })) { failures++; continue; }
+    if (!buildOneGraph(s.path, { sql, label })) { failures++; continue; }
     if (!(await indexOneGraph(s.path))) unindexed.push(s.name);
   }
   console.log(`\n${targets.length - failures}/${targets.length} graph(s) built. Query them with the graph_query MCP tool.`);
@@ -1655,6 +1717,45 @@ async function cmdUi(args) {
   });
 }
 
+// ============================================================ vendor-graph
+/**
+ * Keep a local copy of the library graphify's page draws with.
+ *
+ * The page is good and worth serving as it is, but it fetches vis-network
+ * from a CDN, so without the internet it renders a blank canvas — and amalgam
+ * promises that nothing but the frontier model reaches the network. One
+ * download, kept beside everything else amalgam has fetched, and the promise
+ * holds again.
+ */
+async function cmdVendorGraph() {
+  const { VENDOR_DIR, VIS_FILE, visVendored } = await import("../lib/graphpage.mjs");
+  if (visVendored()) {
+    console.log(`Already here: ${VIS_FILE}`);
+    console.log("The interactive graph opens without touching the network.");
+    return;
+  }
+  const url = "https://unpkg.com/vis-network@9.1.6/standalone/umd/vis-network.min.js";
+  console.log(`Fetching ${url} ...`);
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const body = Buffer.from(await res.arrayBuffer());
+    // A truncated or redirected download would leave a file that exists and
+    // does not work, which is worse than one that is missing.
+    if (body.length < 100_000 || !body.includes("vis-network")) {
+      throw new Error(`that did not look like the library (${body.length} bytes)`);
+    }
+    fs.mkdirSync(VENDOR_DIR, { recursive: true });
+    fs.writeFileSync(VIS_FILE, body);
+    console.log(`  ${(body.length / 1024).toFixed(0)} KB -> ${VIS_FILE}`);
+    console.log("The interactive graph now opens without touching the network.");
+  } catch (e) {
+    console.error(`Could not fetch it: ${e.message}`);
+    console.error("The graph still works while you are online.");
+    process.exit(1);
+  }
+}
+
 // ================================================================ contracts
 /**
  * The links a parser cannot see: one component calling another by name.
@@ -1696,6 +1797,7 @@ switch (cmd) {
   case "shim": cmdShim(rest); break;
   case "version": case "--version": case "-v": cmdVersion(); break;
   case "update": await cmdUpdate(rest); break;
+  case "vendor-graph": await cmdVendorGraph(); break;
   default:
     // Distinguish "you typed a command I don't know" from "I received nothing
     // at all". The second usually means a shell wrapper ate the arguments,

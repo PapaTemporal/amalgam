@@ -78,10 +78,25 @@ carry their confidence, because one is a fact about syntax and the other is a
 match between strings.
 
 ```bash
-amalgam graph              # build/refresh, then index for search
+amalgam graph              # build/refresh, cluster, then index for search
 amalgam graph --check      # is it stale?
 amalgam graph --sql        # also parse .sql
+amalgam graph --label      # name the communities using the local model
+amalgam vendor-graph       # keep the graph page's drawing library locally
 ```
+
+Building now clusters as well as extracts, which is what writes graphify's
+**GRAPH_REPORT.md** and its interactive **graph.html** — every symbol a node,
+coloured by the community it belongs to, with a sidebar to filter and search
+and a panel that inspects one. amalgam serves that page rather than competing
+with it: open it from a project, under *Interactive graph*.
+
+Two notes on it. Communities are numbered unless you pass `--label`, which
+names them from the local model — no key, no cloud call, and the difference
+between a legend reading "Community 0" and one reading "api.js". And the page
+fetches its drawing library from a CDN, so it is blank offline; `amalgam
+vendor-graph` keeps one 686 KB copy and the page never reaches the network
+again.
 
 **The design rule:** the graph decides *which* lines matter, the working tree
 supplies *what they say*. A symbol that moved is located by name, a symbol that
