@@ -16,7 +16,7 @@
   },
   "license": "MIT",
   "scripts": {
-    "test": "node tests/recall-eval.mjs && node tests/memory-eval.mjs && node tests/graph-eval.mjs && node tests/graphdb-eval.mjs && node tests/task-eval.mjs && node tests/capture-eval.mjs && node tests/stream-eval.mjs && node tests/check-eval.mjs && node tests/gate-eval.mjs && node tests/hook-eval.mjs && node tests/trace-eval.mjs && node tests/survey-eval.mjs && node tests/collide-eval.mjs && node tests/contracts-eval.mjs",
+    "test": "node tests/recall-eval.mjs && node tests/memory-eval.mjs && node tests/graph-eval.mjs && node tests/graphdb-eval.mjs && node tests/task-eval.mjs && node tests/capture-eval.mjs && node tests/stream-eval.mjs && node tests/check-eval.mjs && node tests/gate-eval.mjs && node tests/hook-eval.mjs && node tests/trace-eval.mjs && node tests/survey-eval.mjs && node tests/collide-eval.mjs && node tests/contracts-eval.mjs && node tests/explore-eval.mjs",
     "ui:build": "cd ui && npm install && npm run build",
     "ui": "node bin/amalgam.mjs ui"
   }

@@ -89,6 +89,13 @@ was deleted is reported missing, and edges are checked against the source
 before being reported — a Promise callback named `resolve` is not a call to
 your exported `resolve`. A stale graph costs precision, never correctness.
 
+The same graph is browsable by hand in the interface — `amalgam ui`, then
+**Explore** on a project. Search by meaning, walk the tree, see the hubs and
+clusters, draw the neighbourhood of any symbol, trace a path between two, or
+ask what a change would reach. Paths and blast radii cross service boundaries
+through the inferred contract edges, and every hop that came from a route
+string rather than a parser says so. See **[the interface](ui.md#explore)**.
+
 ## Running things
 
 | Tool | Purpose |

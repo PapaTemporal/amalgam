@@ -235,6 +235,67 @@ are inferred, never mixed into the parsed `calls` edges, and re-verified against
 the source before being shown — a match whose literal has since moved is
 dropped rather than reported.
 
+### Explore
+
+The map is about services. This is about symbols — the same questions
+graphify's own viewer answers, asked of a whole project at once, over the
+graph the agent uses, with the service boundaries joined up.
+
+![Exploring the code graph](images/explore.png)
+
+Three panes, because three questions get asked together and splitting them
+across pages means losing your place every time you follow an edge.
+
+**Find**, on the left, three ways:
+
+- **Search** — describe what you want rather than naming it. *"where orders
+  get written"* beats a function name you are guessing at. Ranked by meaning
+  when the embedding model is installed, by name when it is not, and it says
+  which you are getting.
+- **Tree** — service, then directory, then file, then symbol, with a count on
+  every row so a folded branch still says how much it is hiding. The view that
+  answers "what is even in here", which no node-and-edge picture ever does.
+- **Shape** — the hubs (most connected: where a change is felt widest), the
+  clusters and how tightly each hangs together, and the edges that bridge
+  otherwise separate clusters.
+
+**Draw**, in the middle: the neighbourhood of the selected symbol as columns,
+not a cloud. Callers to the left, the symbol in the middle, callees to the
+right — direction in the geometry rather than in an arrowhead you have to
+squint at, and the same layout every time so it can be talked about. Depth 1–3.
+Click any box to move there.
+
+Edges inferred from route strings are **dashed and labelled with the route**,
+because an HTTP hop is not a function call and drawing it identically would be
+a lie the picture tells silently.
+
+**Read**, below: the source, taken from the working tree the moment you asked —
+never quoted from the index. If the symbol has moved since the graph was built
+it is found anyway and the page says where it actually is; if it is gone, the
+page says gone rather than showing you something stale. Beside it, what calls
+this and what this calls, each clickable, with a count of any index edges that
+were not in the source and so are not listed.
+
+Two more tabs on that pane:
+
+- **Impact** — what a change here could reach. Reverse traversal across the
+  whole project, counted per service, ordered by hops. Anything reached through
+  a route string is marked *via* with the route it travelled, because a blast
+  radius that stops at a repository boundary is wrong in the expensive
+  direction, and one that crosses it silently is wrong in the other:
+
+  ![What a change could reach](images/impact.png)
+
+- **Path** — how one symbol reaches another. Directed first, since "does A
+  eventually call B" is the question people mean; if there is no directed
+  route, the undirected one is returned and labelled as such. Each hop over the
+  wire is shown as the route it crosses.
+
+Everything on this page is arithmetic over files already on disk. No model is
+involved and nothing is started. The whole view is deep-linkable — `?id=` for
+the symbol, `?panel=impact` for the tab — so a finding can be sent to somebody
+rather than described.
+
 ### Metrics
 
 ![Metrics](images/metrics.png)

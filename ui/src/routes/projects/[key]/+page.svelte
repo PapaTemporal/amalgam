@@ -208,6 +208,7 @@ import RemoveProject from "$lib/RemoveProject.svelte";
           {p.graph ? "Rebuild" : "Build"}
         </button>
         <a class="btn" href={`/projects/${key}/map`}>Map</a>
+        <a class="btn" href={`/projects/${key}/explore`}>Explore</a>
       </div>
     </div>
 
