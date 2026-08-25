@@ -31,11 +31,13 @@ import { findSpecs, parseSprintStatus, assess, verify as verifyStories,
 import { open as openDb, ftsQuery, logUsage, DB_PATH } from "../lib/db.mjs";
 import { embed, similarity, toBlob, fromBlob, embeddingsInstalled } from "../lib/embed.mjs";
 import { verifyFact } from "../lib/verify.mjs";
+import { staleFiles, projectStaleFiles } from "../lib/freshness.mjs";
 import { createTask, addEvent, setState, listTasks, resume, renderResume } from "../lib/tasks.mjs";
 import { loadGraph, hasGraph, findSymbols, sliceSymbol, callersOf, calleesOf,
          changedFiles, changedRanges, symbolsInRanges } from "../lib/graph.mjs";
 import { isIndexed, graphFromDb, searchSymbols } from "../lib/graphdb.mjs";
-import { graphFor as graphForAny, isWorkspace, searchWorkspace } from "../lib/workspace.mjs";
+import { graphFor as graphForAny, isWorkspace, searchWorkspace,
+         services as workspaceServices } from "../lib/workspace.mjs";
 
 // Machine-level home: runtimes, model, and data live here (shared by all
 // projects on the machine). The package itself only carries code.
@@ -177,11 +179,34 @@ function symbolHeader(g, n, sym, repo = null, cache = new Map()) {
  * hidden: selection quality degrades with staleness even though the quoted
  * text is always current, and an agent should know which it is looking at.
  */
+/**
+ * What the graph has not seen, named rather than counted.
+ *
+ * A count tells you to distrust the index. The names tell you *what* to
+ * distrust, which is the difference between a warning and something to act
+ * on: read these files directly, believe the index about everything else.
+ * That mitigation costs one `git diff --name-only` however large the
+ * repository is, which is the opposite of how rebuilding scales — and it is
+ * the only thing that helps at all on a repository too big to rebuild often.
+ *
+ * A workspace has no single build commit, so this used to return nothing for
+ * exactly the projects that most need it. It now asks each service.
+ */
 function graphDrift(repo, g) {
-  if (!g.builtAt) return "";
-  const changed = changedFiles(repo, g.builtAt, git);
-  if (!changed || changed.length === 0) return "";
-  return `graph built at ${String(g.builtAt).slice(0, 8)}; ${changed.length} file(s) changed since, so selection may miss recent symbols`;
+  const parts = g?.workspace
+    ? projectStaleFiles(repo, workspaceServices(repo))
+    : (() => {
+        const one = staleFiles(repo, { builtAtCommit: g?.builtAt ?? null });
+        return one ? [{ service: null, ...one }] : [];
+      })();
+  if (!parts.length) return "";
+
+  const total = parts.reduce((n, p) => n + p.total, 0);
+  const shown = parts.flatMap((p) => p.files.map((f) => (p.service ? `${p.service}/${f}` : f)));
+  const head = `the graph predates ${total} changed file(s) — read these directly rather than trusting the index for them:`;
+  const list = shown.slice(0, 24).join(", ");
+  const more = total > 24 ? `, and ${total - 24} more` : "";
+  return `${head} ${list}${more}`;
 }
 
 // ------------------------------------------------------------- graphify bridge
