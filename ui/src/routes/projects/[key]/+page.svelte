@@ -83,6 +83,7 @@ import RemoveProject from "$lib/RemoveProject.svelte";
   let pages = $state(null);
   $effect(() => { if (key && !pages) get("/graphpages", { key }).then((g) => (pages = g)).catch(() => {}); });
   const drawn = $derived((pages?.services ?? []).filter((s) => s.hasPage));
+  let showDiagrams = $state(false);
 
   async function vendorGraph() {
     jobLabel = "Making the graph work offline";
@@ -164,7 +165,13 @@ import RemoveProject from "$lib/RemoveProject.svelte";
     const { jobId } = await post("/run", { what: "refresh", path: p.path });
     watchJob(jobId, async (u) => {
       job = u;
-      if (u.state === "done" || u.state === "failed") { data = null; await load(); }
+      if (u.state === "done" || u.state === "failed") {
+        data = null;
+        // Rebuilding is what creates the diagram in the first place, so what
+        // the page knows about built diagrams is stale the moment it finishes.
+        pages = null;
+        await load();
+      }
     });
   }
 
@@ -309,6 +316,12 @@ import RemoveProject from "$lib/RemoveProject.svelte";
         </button>
         <a class="btn" href={`/projects/${key}/map`}>Map</a>
         <a class="btn" href={`/projects/${key}/explore`}>Explore</a>
+        {#if drawn.length === 1}
+          <a class="btn" target="_blank" rel="noreferrer"
+             href={`/graph/${key}${p.workspace ? `/${drawn[0].service}` : ""}`}>Diagram</a>
+        {:else if drawn.length > 1}
+          <button onclick={() => (showDiagrams = !showDiagrams)}>Diagram</button>
+        {/if}
       </div>
     </div>
 
@@ -357,39 +370,37 @@ import RemoveProject from "$lib/RemoveProject.svelte";
     </div>
   </div>
 
+  {#if showDiagrams && drawn.length > 1}
+    <div class="card" style="margin-bottom:1.25rem">
+      <span class="label">Diagram — one per service</span>
+      <div class="row" style="margin-top:.5rem;flex-wrap:wrap">
+        {#each drawn as d}
+          <a class="btn" target="_blank" rel="noreferrer"
+             href={`/graph/${key}/${d.service}`}>{d.service}</a>
+        {/each}
+      </div>
+    </div>
+  {/if}
+
+  {#if pages && drawn.length && !pages.vendored && drawn.some((d) => d.needsNetwork)}
+    <div class="card" style="margin-bottom:1.25rem">
+      <div class="spread">
+        <div>
+          <strong class="tiny">The diagram needs the internet to draw itself.</strong>
+          <p class="tiny muted" style="margin:.35rem 0 0;max-width:62ch">
+            graphify's page fetches its drawing library from a CDN, so it is blank offline. One
+            686 KB copy kept here and it never reaches the network again.
+          </p>
+        </div>
+        <button onclick={vendorGraph}>Keep a local copy</button>
+      </div>
+    </div>
+  {/if}
+
   {#if job}
     <div class="card {job.state === 'failed' ? 'bad-edge' : ''}" style="margin-bottom:1.25rem">
       <h2>{job.title ?? jobLabel}</h2>
       <Stepper steps={job.steps} status={job.state} error={job.error} />
-    </div>
-  {/if}
-
-  {#if drawn.length}
-    <div class="card" style="margin-bottom:1.25rem">
-      <div class="spread">
-        <div>
-          <span class="label">Interactive graph</span>
-          <p class="tiny muted" style="margin:.35rem 0 0">
-            graphify's own view: every symbol a node, coloured by the community it belongs to,
-            with a sidebar to filter and search. Built when the graph is.
-          </p>
-        </div>
-        {#if pages && !pages.vendored && drawn.some((d) => d.needsNetwork)}
-          <button onclick={vendorGraph}>Make it work offline</button>
-        {/if}
-      </div>
-      <div class="row" style="margin-top:.7rem;flex-wrap:wrap">
-        {#each drawn as d}
-          <a class="btn" target="_blank" rel="noreferrer"
-             href={`/graph/${key}${p.workspace ? `/${d.service}` : ""}`}>{d.service}</a>
-        {/each}
-      </div>
-      {#if pages && !pages.vendored && drawn.some((d) => d.needsNetwork)}
-        <p class="tiny faint" style="margin:.6rem 0 0">
-          The page draws with a library it fetches from the internet, so it is blank offline.
-          One 600 KB download keeps a copy here and it never needs the network again.
-        </p>
-      {/if}
     </div>
   {/if}
 

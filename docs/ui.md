@@ -125,8 +125,17 @@ without going to look for a log:
 Everything about one codebase on one page.
 
 - **Start work** — four buttons, described below.
-- **Code graph** — symbols, edges, when it was last indexed, and a button to
-  rebuild.
+- **Code graph** — symbols, edges, when it was last indexed, and buttons to
+  rebuild, open the service map, explore the symbols, or open the **Diagram**.
+  Rebuild does the whole job: extract, cluster, name the communities with the
+  local model if one is installed, and work out the links between services.
+  There is no flag to remember and nothing left to run in a terminal.
+- **Diagram** — graphify's own interactive graph, served rather than rebuilt.
+  Every symbol a node, coloured by the community it belongs to, with a sidebar
+  to filter and search and a panel that inspects one. It appears once a graph
+  has been built, one per service. The page fetches its drawing library from a
+  CDN, so the first time it would need the internet the project page offers to
+  keep a 686 KB copy locally; after that it never reaches the network again.
 - **Checks** — what was detected, and a button to run the gate.
 - **Stories** — how many exist and, in the number worth watching, how many are
   marked done while declaring no way to check them.
