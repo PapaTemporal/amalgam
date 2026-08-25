@@ -110,7 +110,13 @@
             {#if p.branch}<span class="pill">{p.branch}</span>{/if}
             {#if p.hasBmad}<span class="pill">bmad</span>{/if}
             {#if p.workspace}<span class="pill">{p.services.length} services</span>{/if}
-            {#if p.graph}<span class="pill">{p.graph.symbols.toLocaleString()} symbols</span>
+            {#if p.graph}
+              <span class="pill" class:warn={p.graph.freshness?.stale}
+                    title={p.graph.freshness?.stale
+                      ? `${p.graph.freshness.commits} code commit(s) since it was built`
+                      : "up to date with the code"}>
+                {p.graph.symbols.toLocaleString()} symbols{#if p.graph.freshness?.stale}{" · "}{p.graph.freshness.commits} behind{/if}
+              </span>
             {:else}<span class="pill warn">no graph</span>{/if}
             {#if p.checks.length}<span class="pill">{p.checks.join(", ")}</span>
             {:else if p.services?.some((s) => s.checks.length)}

@@ -100,6 +100,27 @@ fetches its drawing library from a CDN, so it is blank offline; `amalgam
 vendor-graph` keeps one 686 KB copy and the page never reaches the network
 again.
 
+**Staying accurate as the code moves.** Four things, none of which is a
+background process:
+
+1. *Nothing is quoted from the index.* The graph decides which lines matter;
+   the file supplies what they say. A symbol that moved is found by name, a
+   symbol that was deleted is reported missing, and an edge is re-read at the
+   call site before it is reported. This is why a stale graph costs precision
+   rather than correctness — it misses what is new, it does not invent what
+   is gone.
+2. *Staleness is counted and shown.* Commits touching code since the graph was
+   built, per repository, on the project card and the Code Graph panel, and in
+   `amalgam graph --check`. Prose-only commits are excluded, because a warning
+   that is usually noise is a warning nobody reads.
+3. *Memory facts are checked when accepted and on demand.* `amalgam memory
+   verify` re-reads the filesystem anchors in every live fact and marks the
+   ones whose paths have gone. A fact with nothing checkable is reported as
+   unknown rather than as fine.
+4. *Nothing is believed twice.* An accepted fact that restates a stored one is
+   reported as a near-duplicate, and `memory_supersede` marks the older so
+   recall stops returning both.
+
 **The design rule:** the graph decides *which* lines matter, the working tree
 supplies *what they say*. A symbol that moved is located by name, a symbol that
 was deleted is reported missing, and edges are checked against the source

@@ -25,6 +25,7 @@ import { ensureLlama, llamaHealthy, modelInstalled, LLAMA_PORT,
          stopLlama, minutesIdle, IDLE_MINUTES } from "../lib/services.mjs";
 import { open as openDb } from "../lib/db.mjs";
 import { verifyFact } from "../lib/verify.mjs";
+import { graphStaleness as freshnessOf } from "../lib/freshness.mjs";
 import { check as runCheck, render as renderCheck } from "../lib/checks.mjs";
 import { runGate, renderGate, detectChecks } from "../lib/gates.mjs";
 import { contracts as findContracts, saveContracts, render as renderContracts } from "../lib/contracts.mjs";
@@ -651,21 +652,13 @@ function cmdWire(args) {
 
 const GRAPH_REL = path.join("graphify-out", "graph.json");
 
-/** null = no graph; otherwise commits landed since it was built. */
+// Staleness lives in lib/freshness.mjs, because the interface has to answer
+// the same question and two implementations would disagree the first time one
+// of them changed. Dates come back as strings from there; the callers here
+// want a Date.
 function graphStaleness(repo) {
-  const g = path.join(repo, GRAPH_REL);
-  if (!fs.existsSync(g)) return null;
-  let builtAt;
-  try { builtAt = fs.statSync(g).mtime; } catch { return null; }
-  if (!git(repo, ["rev-parse", "--git-dir"]).ok) return { builtAt, commits: 0, unknown: true };
-  // Only code changes can invalidate a code graph. Counting doc/config-only
-  // commits would nag for a rebuild that changes nothing.
-  const out = git(repo, [
-    "log", "--since", builtAt.toISOString(), "--oneline", "--",
-    ".", ":(exclude)*.md", ":(exclude)*.txt", ":(exclude).gitignore",
-    ":(exclude)docs/**", ":(exclude)LICENSE*",
-  ]).out;
-  return { builtAt, commits: out ? out.split("\n").filter(Boolean).length : 0 };
+  const s = freshnessOf(repo);
+  return s ? { ...s, builtAt: new Date(s.builtAt) } : null;
 }
 
 function buildOneGraph(dir, { sql = false, label = false } = {}) {

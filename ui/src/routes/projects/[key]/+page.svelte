@@ -305,6 +305,18 @@ import RemoveProject from "$lib/RemoveProject.svelte";
         <div class="stat small">none</div>
         <span class="tiny faint">{p.graphBlocked ?? "code search and impact need this"}</span>
       {/if}
+      <!-- How far behind the code it is. The graph never invents something
+           that was deleted — the working tree is read for anything quoted —
+           but it cannot find what did not exist when it was built, and that
+           is what these commits are. -->
+      {#if p.graph?.freshness?.stale}
+        <p class="tiny stale" style="margin:.4rem 0 0">
+          {p.graph.freshness.commits} code commit{p.graph.freshness.commits === 1 ? "" : "s"} since
+          it was built{#if p.graph.freshness.behind.length > 1 || p.workspace}
+            — in {p.graph.freshness.behind.join(", ")}{/if}.
+          Anything added since is invisible to search and impact.
+        </p>
+      {/if}
       {#if p.graph && pages && !drawn.length}
         <p class="tiny faint" style="margin:.4rem 0 0">
           No picture of it yet — drawing takes seconds, the graph is already built.
@@ -610,6 +622,7 @@ import RemoveProject from "$lib/RemoveProject.svelte";
   table.hidden { display: none; }
   .noagent { border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--line));
              border-radius: 8px; padding: .7rem .8rem; margin-top: .5rem; }
+  .stale { color: var(--warn); }
   .services { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; }
   .pending { color: var(--ink-faint); border: 1px dashed var(--line); border-radius: 6px;
              padding: .35rem .6rem; }
