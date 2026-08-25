@@ -82,6 +82,8 @@ amalgam graph              # build/refresh, cluster, then index for search
 amalgam graph --check      # is it stale?
 amalgam graph --sql        # also parse .sql
 amalgam graph --label      # name the communities using the local model
+amalgam diagram            # draw a graph that is already built (seconds)
+amalgam diagram --label    # ...and name its communities with the local model
 amalgam vendor-graph       # keep the graph page's drawing library locally
 ```
 

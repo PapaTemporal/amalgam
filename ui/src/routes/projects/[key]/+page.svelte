@@ -83,6 +83,24 @@ import RemoveProject from "$lib/RemoveProject.svelte";
   $effect(() => { if (key && !pages) get("/graphpages", { key }).then((g) => (pages = g)).catch(() => {}); });
   const drawn = $derived((pages?.services ?? []).filter((s) => s.hasPage));
   let showDiagrams = $state(false);
+  const undrawn = $derived((pages?.services ?? []).filter((s) => !s.hasPage && !s.tooLarge));
+
+  /**
+   * Draw the graph that is already built.
+   *
+   * Only the clustering pass, not a rebuild: the nodes and edges exist, and
+   * re-extracting a large repository to produce a picture would cost minutes
+   * for something that takes seconds.
+   */
+  async function drawDiagram() {
+    jobLabel = "Drawing the graph";
+    job = { state: "running", steps: [] };
+    const { jobId } = await post("/run", { what: "diagram", path: p.path });
+    watchJob(jobId, async (u) => {
+      job = u;
+      if (u.state === "done") pages = await get("/graphpages", { key });
+    });
+  }
 
   async function vendorGraph() {
     jobLabel = "Making the graph work offline";
@@ -287,17 +305,26 @@ import RemoveProject from "$lib/RemoveProject.svelte";
         <div class="stat small">none</div>
         <span class="tiny faint">{p.graphBlocked ?? "code search and impact need this"}</span>
       {/if}
+      {#if p.graph && pages && !drawn.length}
+        <p class="tiny faint" style="margin:.4rem 0 0">
+          No picture of it yet — drawing takes seconds, the graph is already built.
+        </p>
+      {/if}
       <div class="row" style="margin-top:.6rem">
         <button disabled={!!p.graphBlocked} onclick={refreshEverything}>
           {p.graph ? "Rebuild" : "Build"}
         </button>
         <a class="btn" href={`/projects/${key}/map`}>Map</a>
         <a class="btn" href={`/projects/${key}/explore`}>Explore</a>
-        {#if drawn.length === 1}
-          <a class="btn" target="_blank" rel="noreferrer"
-             href={`/graph/${key}${p.workspace ? `/${drawn[0].service}` : ""}`}>Diagram</a>
-        {:else if drawn.length > 1}
-          <button onclick={() => (showDiagrams = !showDiagrams)}>Diagram</button>
+        <!-- Always offered once a graph exists. Hiding it until the page had
+             been generated meant there was no way to learn it existed, or
+             that it was one click away. -->
+        {#if p.graph && !p.workspace && drawn.length === 1}
+          <a class="btn" target="_blank" rel="noreferrer" href={`/graph/${key}`}>Diagram</a>
+        {:else if p.graph && pages}
+          <button onclick={() => (showDiagrams = !showDiagrams)}>
+            Diagram{#if !drawn.length} — not drawn yet{/if}
+          </button>
         {/if}
       </div>
     </div>
@@ -347,15 +374,55 @@ import RemoveProject from "$lib/RemoveProject.svelte";
     </div>
   </div>
 
-  {#if showDiagrams && drawn.length > 1}
+  {#if showDiagrams && pages}
     <div class="card" style="margin-bottom:1.25rem">
-      <span class="label">Diagram — one per service</span>
-      <div class="row" style="margin-top:.5rem;flex-wrap:wrap">
-        {#each drawn as d}
-          <a class="btn" target="_blank" rel="noreferrer"
-             href={`/graph/${key}/${d.service}`}>{d.service}</a>
+      <div class="spread">
+        <div>
+          <span class="label">Diagram</span>
+          <p class="tiny muted" style="margin:.35rem 0 0;max-width:70ch">
+            graphify's own view: every symbol a node, coloured by the community it belongs to,
+            with a sidebar to filter and search. One per repository, because that is how it is
+            built.
+          </p>
+        </div>
+        {#if undrawn.length}
+          <button class="primary" onclick={drawDiagram} disabled={job?.state === "running"}>
+            {job?.state === "running" ? "Drawing…" : drawn.length ? `Draw the other ${undrawn.length}` : "Draw it"}
+          </button>
+        {/if}
+      </div>
+
+      <div class="services" style="margin-top:.7rem">
+        {#each pages.services as svc}
+          {#if svc.hasPage}
+            <a class="btn" target="_blank" rel="noreferrer"
+               href={`/graph/${key}${p.workspace ? `/${svc.service}` : ""}`}>{svc.service}</a>
+          {:else if svc.tooLarge}
+            <span class="pending tiny"
+                  title={`${svc.symbols.toLocaleString()} symbols — clustered, but no browser can usefully draw that`}>
+              {svc.service} · too large to draw
+            </span>
+          {:else}
+            <span class="pending tiny" title="No page yet — drawing takes seconds, the graph is already built">
+              {svc.service} · not drawn
+            </span>
+          {/if}
         {/each}
       </div>
+
+      {#if (pages?.services ?? []).some((s) => s.tooLarge)}
+        <p class="tiny faint" style="margin:.6rem 0 0">
+          A repository past a few thousand symbols is clustered but not drawn — its communities
+          are real and everything else uses them, but a browser cannot usefully lay out that many
+          nodes. Use <strong>Explore</strong> for those: it is built for the size.
+        </p>
+      {/if}
+      {#if undrawn.length}
+        <p class="tiny faint" style="margin:.6rem 0 0">
+          Drawing is the clustering pass only — the symbols and edges already exist, so it takes
+          seconds rather than the minutes a rebuild would.
+        </p>
+      {/if}
     </div>
   {/if}
 
@@ -550,6 +617,9 @@ import RemoveProject from "$lib/RemoveProject.svelte";
   table.hidden { display: none; }
   .noagent { border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--line));
              border-radius: 8px; padding: .7rem .8rem; margin-top: .5rem; }
+  .services { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; }
+  .pending { color: var(--ink-faint); border: 1px dashed var(--line); border-radius: 6px;
+             padding: .35rem .6rem; }
   .row-actions { text-align: right; width: 1%; white-space: nowrap; }
   .linky { background: none; border: none; color: var(--ink-faint); font-size: .78rem;
            cursor: pointer; padding: .2rem .35rem; border-radius: 4px; }

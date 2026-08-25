@@ -132,10 +132,19 @@ Everything about one codebase on one page.
   There is no flag to remember and nothing left to run in a terminal.
 - **Diagram** — graphify's own interactive graph, served rather than rebuilt.
   Every symbol a node, coloured by the community it belongs to, with a sidebar
-  to filter and search and a panel that inspects one. It appears once a graph
-  has been built, one per service. The page fetches its drawing library from a
-  CDN, so the first time it would need the internet the project page offers to
-  keep a 686 KB copy locally; after that it never reaches the network again.
+  to filter and search and a panel that inspects one.
+
+  The button is there as soon as a graph exists, whether or not a picture has
+  been drawn yet, and opens a panel naming every repository and its state:
+  drawn, not drawn, or too large to draw. **Draw it** runs the clustering pass
+  alone — the symbols and edges already exist, so it is seconds rather than
+  the minutes a rebuild costs. A repository past a few thousand symbols is
+  clustered but never drawn, because a browser cannot usefully lay out that
+  many nodes; use **Explore** for those, which is built for the size.
+
+  The page fetches its drawing library from a CDN, so the first time it would
+  need the internet the panel offers to keep a 686 KB copy locally; after that
+  it never reaches the network again.
 - **Checks** — what was detected, and a button to run the gate.
 - **Stories** — how many exist and, in the number worth watching, how many are
   marked done while declaring no way to check them.

@@ -1717,6 +1717,44 @@ async function cmdUi(args) {
   });
 }
 
+// ================================================================= diagram
+/**
+ * Draw the graph that has already been built.
+ *
+ * Clustering is a separate pass from extraction, and it is the one that writes
+ * the interactive page. A full `amalgam graph` re-extracts first, which on a
+ * large repository is minutes of work to produce a picture that only needed
+ * the seconds — so this is the same second pass on its own, for a graph that
+ * already exists.
+ */
+async function cmdDiagram(args) {
+  const { opts, words } = parseArgs(args);
+  const explicit = words[0];
+  const label = opts.label !== undefined && modelInstalled();
+  if (opts.label !== undefined && !label) {
+    console.log("(--label needs the local model: amalgam install --with-model)\n");
+  }
+
+  const cwd = path.resolve(explicit ?? process.cwd());
+  const services = explicit ? [] : findServices(cwd);
+  const isRepo = git(cwd, ["rev-parse", "--git-dir"]).ok;
+  const targets = (!explicit && !isRepo && services.length >= 2)
+    ? services.filter((s) => s.isGit)
+    : [{ name: path.basename(cwd), path: cwd }];
+
+  let drawn = 0;
+  for (const t of targets) {
+    if (!fs.existsSync(path.join(t.path, GRAPH_REL))) {
+      console.log(`  ${t.name}: no graph yet — run \`amalgam graph\` first`);
+      continue;
+    }
+    console.log(`\n=== ${t.name}`);
+    if (clusterOneGraph(t.path, { label })) drawn++;
+  }
+  console.log(`\n${drawn}/${targets.length} drawn.`);
+  if (!drawn) process.exit(1);
+}
+
 // ============================================================ vendor-graph
 /**
  * Keep a local copy of the library graphify's page draws with.
@@ -1798,6 +1836,7 @@ switch (cmd) {
   case "version": case "--version": case "-v": cmdVersion(); break;
   case "update": await cmdUpdate(rest); break;
   case "vendor-graph": await cmdVendorGraph(); break;
+  case "diagram": await cmdDiagram(rest); break;
   default:
     // Distinguish "you typed a command I don't know" from "I received nothing
     // at all". The second usually means a shell wrapper ate the arguments,
