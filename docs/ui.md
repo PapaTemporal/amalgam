@@ -59,6 +59,21 @@ should not change what you have chosen to track.
 
 ### Setup
 
+The first thing on the page is what this machine is still missing — and it is
+there because neither of the two buttons below it covers everything.
+Reinstalling deploys amalgam and fetches the optional models; updating brings
+new code. Neither signs an agent in, fetches the graph's drawing library, or
+rebuilds an index that failed on an older version, because those live on the
+machine rather than in the repository.
+
+Each gap says what it is, why it matters, the command that fixes it, and —
+where the fix belongs to this page — a button that runs it. A repository that
+needs rebuilding links to its project, where Rebuild already is. A machine
+with nothing outstanding says *Ready* and shows where the agent is.
+
+The same check backs `amalgam update`, which prints it when it finishes, so
+the terminal and the interface cannot disagree about whether you are done.
+
 There is no page asking which kind of setup you meant — that question only has
 an answer the first time. The state of the install is a chip at the bottom of
 the sidebar, showing the version when everything is in place and turning amber

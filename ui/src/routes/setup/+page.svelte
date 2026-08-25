@@ -25,10 +25,15 @@
   let agent = $state(null);
   const loadAgent = () => get("/agent").then((a) => (agent = a)).catch(() => {});
 
-  async function installAgent() {
-    const { jobId } = await post("/agent/install", {});
-    follow(jobId, "Installing the agent CLI");
+  // What is missing here, whichever button somebody was about to press.
+  let gaps = $state([]);
+  const loadGaps = () => get("/machine/gaps").then((g) => (gaps = g.gaps)).catch(() => {});
+
+  async function fixGap(gap) {
+    const { jobId } = await post(gap.action.endpoint, {});
+    follow(jobId, gap.action.label);
   }
+
 
   // Both reads land before anything renders. Showing the page as soon as one
   // of them arrives is why the checkboxes used to settle a second apart —
@@ -36,7 +41,7 @@
   // reads as the page changing its mind rather than as data arriving.
   let ready = $state(false);
   async function load() {
-    const [s] = await Promise.all([get("/state"), refreshInstall(), loadAgent()]);
+    const [s] = await Promise.all([get("/state"), refreshInstall(), loadAgent(), loadGaps()]);
     state = s;
     model = s.model;
     embeddings = s.embeddings || embeddings;
@@ -73,7 +78,7 @@
         // PATH may have gained the agent; the cached lookup has to be dropped
         // or it would keep saying "not installed" until a restart.
         await post("/agent/rescan", {}).catch(() => {});
-        await load();
+        await load();   // reloads the gaps too
         if (isUpdate(u)) reloadAfterUpdate();
       }
     });
@@ -174,31 +179,53 @@
   </div>
 {/if}
 
-{#if agent && !agent.cli}
+<!-- What this machine needs, whichever of the two buttons below you were
+     about to press. Neither of them covers all of it: reinstalling deploys
+     amalgam, updating brings new code, and neither signs an agent in, fetches
+     a drawing library, or rebuilds an index that failed on an older version. -->
+{#if gaps.length}
   <div class="card edge-warn" style="margin-bottom:1.25rem">
-    <div class="spread">
-      <div>
-        <strong>No agent CLI on this machine.</strong>
-        <p class="tiny muted" style="margin:.4rem 0 0;max-width:60ch">
-          amalgam can run the work for you — start a task, watch the agent think, answer the
-          questions it asks, see the result — but only if there is an agent it can drive. Without
-          one, every workflow ends at a prompt for you to paste somewhere else.
-        </p>
-      </div>
-      <button class="primary" onclick={installAgent} disabled={job?.state === "running"}>Install it</button>
-    </div>
-    <p class="tiny faint" style="margin:.6rem 0 0">
-      Runs <code>npm install -g @anthropic-ai/claude-code</code>. Needs npm on your PATH.
+    <strong>This machine is not finished yet.</strong>
+    <p class="tiny muted" style="margin:.35rem 0 .8rem;max-width:72ch">
+      None of this arrives with an update or a reinstall — it lives on the machine rather than in
+      the repository.
     </p>
+
+    <div class="gaps">
+      {#each gaps as gap}
+        <div class="gap">
+          <div class="spread">
+            <div>
+              <strong class="tiny">{gap.what}</strong>
+              <p class="tiny muted" style="margin:.25rem 0 0;max-width:70ch">{gap.why}</p>
+              {#if gap.note}<p class="tiny faint" style="margin:.25rem 0 0">{gap.note}</p>{/if}
+              {#if gap.projects}
+                <div class="row" style="margin-top:.4rem;flex-wrap:wrap">
+                  {#each gap.projects as pr}
+                    <a class="btn tiny" href={`/projects/${pr.key}`}>{pr.name}</a>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+            {#if gap.action}
+              <button class="primary" onclick={() => fixGap(gap)} disabled={job?.state === "running"}>
+                {gap.action.label}
+              </button>
+            {/if}
+          </div>
+          <code class="cmd tiny">{gap.fix}</code>
+        </div>
+      {/each}
+    </div>
   </div>
 {:else if agent?.cli}
   <div class="card" style="margin-bottom:1.25rem">
     <div class="spread">
       <div>
-        <span class="label">Agent</span>
+        <span class="label">Ready</span>
         <p class="tiny muted" style="margin:.35rem 0 0">
-          Workflows run here and report back — questions, tool calls and results — instead of
-          handing you a prompt.
+          Agent installed, graphs indexed and drawn, everything optional in place. Workflows run
+          here and report back rather than handing you a prompt.
         </p>
       </div>
       <span class="pill good mono tiny">{agent.cli}</span>
@@ -327,6 +354,13 @@
   .edge-warn { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
   .edge-bad { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
   .warn-text { color: var(--warn); }
+  .gaps { display: flex; flex-direction: column; gap: .8rem; }
+  .gap { border-top: 1px solid var(--line); padding-top: .7rem; }
+  .gap:first-child { border-top: none; padding-top: 0; }
+  .gap .cmd { display: inline-block; margin-top: .4rem; background: #0a0c10;
+              border: 1px solid var(--line); border-radius: 5px; padding: .2rem .45rem;
+              color: #b9c2d0; }
+  .btn.tiny { font-size: .74rem; padding: .2rem .5rem; }
   .when { font-size: .82rem; color: var(--ink-dim); margin: 0 0 .5rem;
           border-left: 2px solid var(--accent); padding-left: .6rem; }
   .when strong { color: var(--ink); }

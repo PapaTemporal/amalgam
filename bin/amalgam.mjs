@@ -1727,69 +1727,15 @@ async function cmdUi(args) {
 /**
  * What an update cannot bring with it.
  *
- * Pulling code updates the code. It does not sign an agent in, download a
- * library, or rebuild an index that failed on a version with the bug in it —
- * all of which live on the machine rather than in the repository. Somebody
- * updating a second machine and finding half of it inert has been failed by
- * the tool, not by their reading, so the tool says what is left.
- *
- * Only things that are actually missing are printed. A machine with nothing
- * outstanding says so in one line.
+ * The check itself lives in lib/readiness.mjs, because the interface has to
+ * answer the same question and two implementations of "is this machine ready"
+ * would disagree the first time one of them changed.
  */
 async function reportMachineGaps() {
-  const todo = [];
-
   try {
-    const { agentCli } = await import("../lib/session.mjs");
-    if (!agentCli()) {
-      todo.push(["No agent CLI here, so the interface can only compose prompts.",
-                 "npm install -g @anthropic-ai/claude-code"]);
-    }
+    const { machineGaps, renderGaps } = await import("../lib/readiness.mjs");
+    console.log(renderGaps(machineGaps()));
   } catch { /* an older deployed copy without it */ }
-
-  try {
-    const { visVendored } = await import("../lib/graphpage.mjs");
-    if (!visVendored()) {
-      todo.push(["The interactive graph fetches its drawing library from the internet.",
-                 "amalgam vendor-graph"]);
-    }
-  } catch { /* likewise */ }
-
-  // Projects on THIS machine, which are not the ones on any other.
-  try {
-    const { readRegistry } = await import("../lib/uiserver.mjs");
-    const { isWorkspace, services: svcOf } = await import("../lib/workspace.mjs");
-    const stale = [];
-    for (const proj of readRegistry().projects) {
-      const root = path.resolve(proj);
-      if (!fs.existsSync(root)) continue;
-      const parts = isWorkspace(root) ? svcOf(root) : [{ name: path.basename(root), path: root }];
-      for (const part of parts) {
-        const hasGraphFile = fs.existsSync(path.join(part.path, GRAPH_REL));
-        if (!hasGraphFile) continue;
-        // A graph that never reached the index is the shape the fixed bugs
-        // left behind, and it looks fine from the outside.
-        if (!isIndexed(part.path)) stale.push(`${part.name} (graph built, never indexed)`);
-        else if (!fs.existsSync(path.join(part.path, "graphify-out", "graph.html"))) {
-          stale.push(`${part.name} (no diagram drawn)`);
-        }
-      }
-    }
-    if (stale.length) {
-      todo.push([`${stale.length} repositor${stale.length === 1 ? "y needs" : "ies need"} rebuilding here: ${stale.slice(0, 4).join(", ")}${stale.length > 4 ? ", …" : ""}`,
-                 "amalgam graph --label     (or Rebuild in the interface)"]);
-    }
-  } catch { /* the registry is optional */ }
-
-  if (!todo.length) {
-    console.log("\nNothing else this machine needs.");
-    return;
-  }
-  console.log(`\nStill to do on this machine — none of it travels with an update:`);
-  for (const [why, how] of todo) {
-    console.log(`\n  ${why}`);
-    console.log(`    ${how}`);
-  }
 }
 
 // ================================================================= diagram
