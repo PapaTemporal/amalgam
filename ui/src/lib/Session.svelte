@@ -86,6 +86,20 @@
       {/if}
     </div>
 
+    {#if s.needsSignIn}
+      <div class="signin">
+        <strong class="tiny">The agent is not signed in.</strong>
+        <p class="tiny muted" style="margin:.35rem 0 .4rem">
+          It started fine, but it has no valid login, so it will refuse every request. This is the
+          one step that has to happen in a terminal — signing in opens a browser and the agent
+          stores the result itself.
+        </p>
+        <pre class="cmd">claude</pre>
+        <p class="tiny faint" style="margin:.35rem 0 0">
+          Run that once, complete the sign-in, then start this again. Nothing here needs changing.
+        </p>
+      </div>
+    {/if}
     {#if s.error}<p class="err tiny">{s.error}</p>{/if}
 
     <div class="log" use:follow>
@@ -169,6 +183,10 @@
               background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: .5rem; }
 
   .notice { color: var(--warn); }
+  .signin { border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line));
+            border-radius: 8px; padding: .7rem .8rem; }
+  .signin .cmd { margin: 0; background: #0a0c10; border: 1px solid var(--line); border-radius: 6px;
+                 padding: .45rem .6rem; font-size: .78rem; color: #b9c2d0; }
   .err { color: var(--bad); }
 
   .typing { display: flex; gap: .25rem; padding-top: .4rem; }
