@@ -2,6 +2,7 @@
   import { get, post, watchJob } from "$lib/api.js";
   import Stepper from "$lib/Stepper.svelte";
   import { page } from "$app/state";
+  import { install, refreshInstall } from "$lib/install.svelte.js";
 
   /**
    * The machine, not the projects.
@@ -13,7 +14,6 @@
    * nothing here can be done from the UI that could not be typed.
    */
   let state = $state(null);
-  let install = $state(null);
   let job = $state(null);
   let jobTitle = $state("");
 
@@ -21,20 +21,42 @@
   let model = $state(false);
 
   async function load() {
-    const [s, i] = await Promise.all([get("/state"), get("/install")]);
+    const [s] = await Promise.all([get("/state"), refreshInstall()]);
     state = s;
-    install = i;
     model = s.model;
     embeddings = s.embeddings || embeddings;
   }
   $effect(() => { if (!state) load(); });
+
+  // What the page shows about the install comes from the store the sidebar
+  // chip reads, so the two can never disagree.
+  const info = $derived(install.data);
+
+  /**
+   * An update replaces the code this page was served from.
+   *
+   * Re-reading /install fixes the numbers, but the JavaScript running the page
+   * is still the old build — and the built pages ship in the repository, so an
+   * update usually changes them. Reloading is the only honest end to it. The
+   * job id is already in the URL, so the finished steps are still on screen
+   * afterwards.
+   */
+  let reloading = $state(false);
+  function reloadAfterUpdate() {
+    reloading = true;
+    setTimeout(() => location.reload(), 900);
+  }
 
   function follow(jobId, title) {
     jobTitle = title;
     job = { state: "running", steps: [] };
     watchJob(jobId, async (u) => {
       job = u;
-      if (u.state === "done") { install = null; state = null; await load(); }
+      if (u.state === "done") {
+        state = null;
+        await load();
+        if (isUpdate(u)) reloadAfterUpdate();
+      }
     });
     // In the URL so a refresh — or a second window — keeps watching rather
     // than losing a job that is still running.
@@ -45,7 +67,7 @@
 
   async function runInstall() {
     const { jobId } = await post("/setup/machine", { embeddings, model });
-    follow(jobId, install?.installed ? "Reinstalling amalgam" : "Setting up amalgam");
+    follow(jobId, info?.installed ? "Reinstalling amalgam" : "Setting up amalgam");
   }
 
   async function runUpdate() {
@@ -53,14 +75,19 @@
     follow(jobId, "Updating amalgam");
   }
 
+  // Arriving with a job already in the URL means this page is watching
+  // something a previous page instance started — after an update, that is the
+  // reload itself, which changes what there is left to say about it.
+  let resumed = $state(false);
   let followed = $state(false);
   $effect(() => {
     const existing = page.url.searchParams.get("job");
-    if (existing && !followed) { followed = true; follow(existing, "Running"); }
+    if (existing && !followed) { followed = true; resumed = true; follow(existing, "Running"); }
   });
 
   const done = $derived(job?.state === "done");
-  const updated = $derived(done && jobTitle === "Updating amalgam");
+  const isUpdate = (j) => (j?.title ?? jobTitle) === "Updating amalgam";
+  const updated = $derived(done && isUpdate(job));
 </script>
 
 <header class="page">
@@ -69,29 +96,29 @@
       <h1>This machine</h1>
       <div class="sub">Everything here is a command you could type. It is shown as it runs.</div>
     </div>
-    {#if install}
-      <span class="pill {install.installed ? 'good' : 'warn'}">
-        {install.installed ? `v${install.version}${install.sourceCommit ? ` · ${install.sourceCommit}` : ""}` : "not installed"}
+    {#if info}
+      <span class="pill {info.installed ? 'good' : 'warn'}">
+        {info.installed ? `v${info.version}${info.sourceCommit ? ` · ${info.sourceCommit}` : ""}` : "not installed"}
       </span>
     {/if}
   </div>
 </header>
 
-{#if install && !install.installed}
+{#if info && !info.installed}
   <div class="card edge-warn" style="margin-bottom:1.25rem">
     <strong>amalgam is not deployed on this machine.</strong>
     <p class="tiny muted" style="margin:.4rem 0 0">
       The pages load from the clone either way, but the parts agents use — the MCP server, the
-      skills, the hooks — live in <span class="mono">{install.home}</span> and are not there yet.
+      skills, the hooks — live in <span class="mono">{info.home}</span> and are not there yet.
       Install below.
     </p>
   </div>
-{:else if install?.stale}
+{:else if info?.stale}
   <div class="card edge-warn" style="margin-bottom:1.25rem">
     <strong>There is a newer version in your clone than the one deployed.</strong>
     <p class="tiny muted" style="margin:.4rem 0 0">
-      Deployed <span class="mono">{install.deployedCommit}</span>,
-      clone is at <span class="mono">{install.sourceCommit}</span>. Update to deploy it.
+      Deployed <span class="mono">{info.deployedCommit}</span>,
+      clone is at <span class="mono">{info.sourceCommit}</span>. Update to deploy it.
     </p>
   </div>
 {/if}
@@ -103,14 +130,22 @@
     {#if done}
       <div class="row" style="margin-top:.5rem">
         <a class="btn primary" href="/">Back to projects</a>
-        {#if updated}
-          <button onclick={() => location.reload()}>Reload the UI</button>
+        {#if updated && !resumed}
+          <button onclick={() => location.reload()}>Reload now</button>
         {/if}
         <button class="ghost" onclick={() => (job = null)}>Run something else</button>
       </div>
       <p class="tiny faint" style="margin-top:.75rem">
         Restart any open agent session — it is still using the tool list it started with.
-        {#if updated}These pages came from the version you just replaced, so reload them too.{/if}
+        {#if updated}
+          {#if resumed}
+            These pages were reloaded, so what you are looking at is the new version.
+          {:else if reloading}
+            These pages came from the version you just replaced, so they are reloading.
+          {:else}
+            These pages came from the version you just replaced — reload them too.
+          {/if}
+        {/if}
       </p>
     {/if}
   </div>
@@ -120,12 +155,12 @@
   <!-- installing, or installing again ------------------------------------- -->
   <div class="card stack">
     <div>
-      <h2>{install?.installed ? "Reinstall" : "Install and wire"}</h2>
+      <h2>{info?.installed ? "Reinstall" : "Install and wire"}</h2>
       <p class="tiny muted">
         Copies amalgam into your home directory, registers it for every project on this machine,
         and puts <code>amalgam</code> on your PATH. Nothing is installed system-wide and nothing
         runs as a service.
-        {#if install?.installed}
+        {#if info?.installed}
           Running it again overwrites the deployed copy — safe, and the way to repair one that
           has drifted. Your memory database and projects are untouched.
         {/if}
@@ -157,7 +192,7 @@
 
     <div>
       <button class="primary" onclick={runInstall} disabled={job?.state === "running"}>
-        {install?.installed ? "Reinstall over the top" : "Start setup"}
+        {info?.installed ? "Reinstall over the top" : "Start setup"}
       </button>
     </div>
   </div>
@@ -173,34 +208,34 @@
       </p>
     </div>
 
-    {#if install}
+    {#if info}
       <dl class="facts">
-        <div><dt>Source</dt><dd class="mono tiny">{install.source}</dd></div>
-        <div><dt>Deployed to</dt><dd class="mono tiny">{install.home}</dd></div>
+        <div><dt>Source</dt><dd class="mono tiny">{info.source}</dd></div>
+        <div><dt>Deployed to</dt><dd class="mono tiny">{info.home}</dd></div>
         <div><dt>Wired</dt><dd class="tiny">
-          {install.wiredUser ? "every project on this machine" : "not at machine level"}{install.wiredProjects ? `, ${install.wiredProjects} named project(s)` : ""}
+          {info.wiredUser ? "every project on this machine" : "not at machine level"}{info.wiredProjects ? `, ${info.wiredProjects} named project(s)` : ""}
         </dd></div>
-        {#if install.installedAt}
-          <div><dt>Last deployed</dt><dd class="tiny">{new Date(install.installedAt).toLocaleString()}</dd></div>
+        {#if info.installedAt}
+          <div><dt>Last deployed</dt><dd class="tiny">{new Date(info.installedAt).toLocaleString()}</dd></div>
         {/if}
       </dl>
 
-      {#if !install.isClone}
+      {#if !info.isClone}
         <p class="tiny warn-text">
           This copy is not a git clone, so there is nothing to pull. Update will still re-deploy
           and re-wire what is here.
         </p>
-      {:else if install.dirty}
+      {:else if info.dirty}
         <p class="tiny warn-text">
-          {install.dirty} uncommitted change(s) in the clone — the pull is skipped rather than
+          {info.dirty} uncommitted change(s) in the clone — the pull is skipped rather than
           risking your work, and the rest still runs.
         </p>
       {/if}
     {/if}
 
     <div>
-      <button class:primary={install?.stale} onclick={runUpdate} disabled={job?.state === "running"}>
-        {install?.stale ? "Update to the newer version" : "Pull and update"}
+      <button class:primary={info?.stale} onclick={runUpdate} disabled={job?.state === "running"}>
+        {info?.stale ? "Update to the newer version" : "Pull and update"}
       </button>
     </div>
   </div>

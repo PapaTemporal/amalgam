@@ -693,26 +693,46 @@ function buildOneGraph(dir, { sql = false } = {}) {
  * than every query paying to parse the document again. Failure is reported and
  * ignored: the JSON remains perfectly usable on its own.
  */
+/**
+ * Fold a built graph into the index, and say whether it worked.
+ *
+ * The return value matters: a graph file that never reached the index is
+ * invisible to everything downstream — counts, search, context packets all
+ * read the index, not the file. Reporting that as a passing note in the middle
+ * of the output produced exactly the confusion it deserved: files on disk,
+ * "graph(s) built" at the end, and nothing indexed.
+ */
 async function indexOneGraph(dir) {
   try {
     const withVectors = embeddingsInstalled();
     const res = await importGraph(dir, {
       embed: withVectors ? async (texts) => (await embed(texts))?.map(toBlob) : null,
     });
-    if (!res.ok) return console.log(`  index skipped: ${res.error}`);
+    if (!res.ok) {
+      console.log(`  NOT INDEXED: ${res.error}`);
+      return false;
+    }
     const vec = withVectors
       ? `${res.embedded} embedded, ${res.reused} vectors reused`
       : "no embeddings installed — name search only";
     console.log(`  indexed -> ${res.symbols} symbols, ${res.edges} edges (${vec}${res.removed ? `, ${res.removed} gone` : ""})`);
+    return true;
   } catch (e) {
-    console.log(`  index skipped: ${e.message}`);
+    console.log(`  NOT INDEXED: ${e.message}`);
+    return false;
   }
 }
 
 function reportStaleness(dir, label = dir) {
   const s = graphStaleness(dir);
-  if (!s) console.log(`  ${label}: no graph — build with \`amalgam graph\``);
-  else if (s.commits > 0) console.log(`  ${label}: built ${s.builtAt.toISOString().slice(0, 10)}, ${s.commits} code commit(s) since — refresh`);
+  if (!s) return console.log(`  ${label}: no graph — build with \`amalgam graph\``);
+  // A graph file nothing has indexed is the failure that looks like success,
+  // so `--check` names it rather than reporting the file's age as if that
+  // were the whole story.
+  if (!isIndexed(dir)) {
+    return console.log(`  ${label}: graph built but NOT INDEXED — nothing can search it; rebuild with \`amalgam graph\``);
+  }
+  if (s.commits > 0) console.log(`  ${label}: built ${s.builtAt.toISOString().slice(0, 10)}, ${s.commits} code commit(s) since — refresh`);
   else console.log(`  ${label}: current (built ${s.builtAt.toISOString().slice(0, 10)})`);
 }
 
@@ -739,7 +759,10 @@ async function cmdGraph(args) {
     }
     if (check) return reportStaleness(target, path.basename(target));
     if (!buildOneGraph(target, { sql })) process.exit(1);
-    await indexOneGraph(target);
+    if (!(await indexOneGraph(target))) {
+      console.error(`\nThe graph was built but could not be indexed, so nothing can search it yet.`);
+      process.exit(1);
+    }
     return;
   }
 
@@ -750,7 +773,10 @@ async function cmdGraph(args) {
   if (!isWorkspace) {
     if (check) return reportStaleness(cwd, path.basename(cwd));
     if (!buildOneGraph(cwd, { sql })) process.exit(1);
-    await indexOneGraph(cwd);
+    if (!(await indexOneGraph(cwd))) {
+      console.error(`\nThe graph was built but could not be indexed, so nothing can search it yet.`);
+      process.exit(1);
+    }
     return;
   }
 
@@ -770,12 +796,20 @@ async function cmdGraph(args) {
   console.log(`workspace ${cwd} — graphing ${targets.length} service(s)`);
   if (skipped.length) console.log(`skipping (not git repos): ${skipped.map((s) => s.name).join(", ")}   include with --all`);
   let failures = 0;
+  const unindexed = [];
   for (const s of targets) {
     if (!buildOneGraph(s.path, { sql })) { failures++; continue; }
-    await indexOneGraph(s.path);
+    if (!(await indexOneGraph(s.path))) unindexed.push(s.name);
   }
   console.log(`\n${targets.length - failures}/${targets.length} graph(s) built. Query them with the graph_query MCP tool.`);
-  if (failures) process.exit(1);
+  // Built and indexed are different things, and only the second one makes a
+  // service searchable. Saying "3/3 built" while two of them indexed nothing
+  // is how a broken index goes unnoticed for days.
+  if (unindexed.length) {
+    console.error(`\n${unindexed.length} service(s) built a graph but could not be indexed: ${unindexed.join(", ")}`);
+    console.error(`Those services will report no symbols until this is fixed.`);
+  }
+  if (failures || unindexed.length) process.exit(1);
 }
 
 // ================================================================ version / update

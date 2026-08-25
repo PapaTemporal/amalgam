@@ -1,5 +1,5 @@
 <script>
-  import { get } from "$lib/api.js";
+  import { install, refreshInstall } from "$lib/install.svelte.js";
 
   /**
    * The state of the install, said once and quietly.
@@ -9,9 +9,14 @@
    * every time after. What is left is the part that is genuinely news: that
    * something needed is missing, or that an update is sitting in the clone.
    * When everything is in place it is a version number and nothing more.
+   *
+   * It reads from the shared store rather than fetching its own copy, so an
+   * install or an update run on the setup page is reflected here immediately
+   * instead of waiting for a page refresh nobody knew to do.
    */
-  let s = $state(null);
-  $effect(() => { if (!s) get("/install").then((d) => (s = d)).catch(() => {}); });
+  $effect(() => { if (!install.loaded) refreshInstall(); });
+
+  const s = $derived(install.data);
 
   const level = $derived(
     !s ? null

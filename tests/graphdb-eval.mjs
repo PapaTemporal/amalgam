@@ -122,6 +122,45 @@ if (!withVectors) {
     `lexical -> ${lexical.map((n) => n.name).join(", ") || "(nothing)"}`);
 }
 
+// --- nodes a graph carries that no file backs -------------------------------
+//
+// The bug this holds down: graphify emits nodes with no source_file — a type
+// referred to but never defined here, a synthetic grouping node. Reading the
+// source for one of those resolved to the repository directory itself, and
+// reading a directory throws. The whole import aborted, so the graph file sat
+// on disk looking built while the index stayed empty and every count read
+// zero. Two of this machine's three repositories were in that state for days.
+//
+// One unbacked node must not cost the other symbols their index.
+const ODD = path.join(TMP, "odd");
+fs.mkdirSync(path.join(ODD, "graphify-out"), { recursive: true });
+fs.writeFileSync(path.join(ODD, "app.js"), "export function realOne() {\n  return 1;\n}\n");
+fs.writeFileSync(path.join(ODD, "graphify-out", "graph.json"), JSON.stringify({
+  directed: true, multigraph: false, graph: {},
+  nodes: [
+    { id: "n_real", label: "realOne()", _callable: true, source_file: "app.js", source_location: "L1" },
+    // No file at all: the shape that aborted the import.
+    { id: "n_type", label: "SomeEnum", source_file: "", source_location: "" },
+    // A path that exists but is a directory, and one that does not exist.
+    { id: "n_dir", label: "graphify-out", source_file: "graphify-out", source_location: "L1" },
+    { id: "n_ghost", label: "deleted()", _callable: true, source_file: "gone.js", source_location: "L3" },
+  ],
+  links: [{ source: "n_real", target: "n_type", relation: "calls", source_file: "app.js", source_location: "L1" }],
+  hyperedges: [], built_at_commit: null,
+}));
+
+const odd = await importGraph(ODD, { embed: embedder });
+check("a node with no source file does not abort the import",
+  odd.ok === true && odd.symbols === 4,
+  odd.ok ? `${odd.symbols} symbols, ${odd.edges} edges` : `import failed: ${odd.error}`);
+
+check("and the repository really is indexed afterwards", isIndexed(ODD),
+  "the failure mode was a graph file on disk with an empty index behind it");
+
+check("the symbol that does have a file still carries its signature",
+  (graphFromDb(ODD)?.nodes.get("n_real")?.name) === "realOne",
+  "one unbacked node must not cost the others their index");
+
 console.log(`\n${failed ? `${failed} check(s) failed` : "all checks passed"}${skipped ? `, ${skipped} skipped` : ""}`);
 // process.exitCode rather than process.exit(): exiting hard while the
 // embedding server's keep-alive socket is still open trips a libuv assertion
