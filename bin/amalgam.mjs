@@ -26,6 +26,8 @@ import { ensureLlama, llamaHealthy, modelInstalled, LLAMA_PORT,
 import { open as openDb } from "../lib/db.mjs";
 import { verifyFact } from "../lib/verify.mjs";
 import { graphStaleness as freshnessOf } from "../lib/freshness.mjs";
+import { recordBuild, dueForRefresh, refreshPlan, autoRefreshEnabled,
+         BUDGET_MS, COOLDOWN_MS } from "../lib/refresh.mjs";
 import { check as runCheck, render as renderCheck } from "../lib/checks.mjs";
 import { runGate, renderGate, detectChecks } from "../lib/gates.mjs";
 import { contracts as findContracts, saveContracts, render as renderContracts } from "../lib/contracts.mjs";
@@ -661,7 +663,8 @@ function graphStaleness(repo) {
   return s ? { ...s, builtAt: new Date(s.builtAt) } : null;
 }
 
-function buildOneGraph(dir, { sql = false, label = false } = {}) {
+function buildOneGraph(dir, { sql = false, label = false, quiet = false } = {}) {
+  const startedAt = Date.now();
   console.log(`\n=== ${path.basename(dir)} — building code graph (tree-sitter, local, no LLM)`);
   // graphify's own hint says `pip install graphifyy[sql]`, which does not apply
   // here: it runs through uv in an ephemeral environment, so the extra belongs
@@ -675,7 +678,10 @@ function buildOneGraph(dir, { sql = false, label = false } = {}) {
     return false;
   }
   console.log(`  graph -> ${path.join(dir, GRAPH_REL)}`);
-  clusterOneGraph(dir, { label });
+  if (!quiet) clusterOneGraph(dir, { label });
+  // What it actually cost here, so the automatic refresh can decide from a
+  // measurement rather than from a guess about size.
+  recordBuild(dir, Date.now() - startedAt);
   return true;
 }
 
@@ -1739,6 +1745,43 @@ async function reportMachineGaps() {
   } catch { /* an older deployed copy without it */ }
 }
 
+// ================================================================= refresh
+/**
+ * Bring stale graphs up to date, within a budget.
+ *
+ * Run by hand, or by the session-end hook when nobody is waiting. Only
+ * extraction and indexing: clustering and drawing are what make a rebuild
+ * expensive and neither affects what an agent can find, so they stay a
+ * deliberate act.
+ */
+async function cmdRefresh(args) {
+  const { opts } = parseArgs(args);
+
+  if (opts.plan !== undefined || opts["dry-run"] !== undefined) {
+    const plan = refreshPlan();
+    if (!plan.length) return console.log("No projects registered.");
+    console.log(`budget ${Math.round(BUDGET_MS / 1000)}s per repository, then ` +
+                `${Math.round(COOLDOWN_MS / 60000)} minutes before the same one again` +
+                `${autoRefreshEnabled() ? "" : "   (automatic refresh is off)"}\n`);
+    for (const p of plan) {
+      const cost = p.lastBuildMs == null ? "never timed" : `${Math.round(p.lastBuildMs / 1000)}s last time`;
+      console.log(`  ${p.refresh ? "WOULD" : "skip "}  ${p.name.padEnd(18)} ${cost.padEnd(16)} ${p.reason}`);
+    }
+    return;
+  }
+
+  const due = opts.force !== undefined
+    ? refreshPlan().filter((p) => p.commits > 0)
+    : dueForRefresh();
+
+  if (!due.length) return console.log("Nothing to refresh.");
+  for (const t of due) {
+    console.log(`\n=== ${t.name} — ${t.reason}`);
+    // quiet: no clustering, no page. Accuracy lives in the index.
+    if (buildOneGraph(t.path, { quiet: true })) await indexOneGraph(t.path);
+  }
+}
+
 // ================================================================= diagram
 /**
  * Draw the graph that has already been built.
@@ -1860,6 +1903,7 @@ switch (cmd) {
   case "update": await cmdUpdate(rest); break;
   case "vendor-graph": await cmdVendorGraph(); break;
   case "diagram": await cmdDiagram(rest); break;
+  case "refresh": await cmdRefresh(rest); break;
   default:
     // Distinguish "you typed a command I don't know" from "I received nothing
     // at all". The second usually means a shell wrapper ate the arguments,

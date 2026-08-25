@@ -84,6 +84,8 @@ amalgam graph --sql        # also parse .sql
 amalgam graph --label      # name the communities using the local model
 amalgam diagram            # draw a graph that is already built (seconds)
 amalgam diagram --label    # ...and name its communities with the local model
+amalgam refresh            # bring stale graphs up to date, within a budget
+amalgam refresh --plan     # what it would do, and why it would skip the rest
 amalgam vendor-graph       # keep the graph page's drawing library locally
 ```
 
@@ -109,15 +111,25 @@ background process:
    call site before it is reported. This is why a stale graph costs precision
    rather than correctness — it misses what is new, it does not invent what
    is gone.
-2. *Staleness is counted and shown.* Commits touching code since the graph was
+2. *Stale graphs refresh themselves, within a budget.* When a session ends the
+   machine is idle and nobody is waiting, so that is when it happens — no
+   daemon, no watcher, no git hook. Only extraction and indexing, never
+   clustering or drawing: accuracy lives in the index and the picture is what
+   makes a rebuild expensive. A repository is only refreshed if amalgam has
+   timed it before and it came in under 90 seconds, and not more than once
+   every 30 minutes. Measured, those gates matter: one repository here
+   refreshes in 17 seconds and another takes 4½ minutes with nothing changed at
+   all. `amalgam refresh --plan` shows the decision for every repository, and
+   `AMALGAM_AUTO_REFRESH=off` stops it entirely.
+3. *Staleness is counted and shown.* Commits touching code since the graph was
    built, per repository, on the project card and the Code Graph panel, and in
    `amalgam graph --check`. Prose-only commits are excluded, because a warning
    that is usually noise is a warning nobody reads.
-3. *Memory facts are checked when accepted and on demand.* `amalgam memory
+4. *Memory facts are checked when accepted and on demand.* `amalgam memory
    verify` re-reads the filesystem anchors in every live fact and marks the
    ones whose paths have gone. A fact with nothing checkable is reported as
    unknown rather than as fine.
-4. *Nothing is believed twice.* An accepted fact that restates a stored one is
+5. *Nothing is believed twice.* An accepted fact that restates a stored one is
    reported as a near-duplicate, and `memory_supersede` marks the older so
    recall stops returning both.
 
