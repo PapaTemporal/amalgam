@@ -173,6 +173,26 @@ If a card cannot do its job it says why rather than sitting at "none" —
 `uv` missing, a service whose graph was built before the index existed, or a
 folder that has no repositories in it yet.
 
+### Asking which workflow fits
+
+BMAD already answers "what should I run for this?" — that is what
+`/bmad-help` is for, and reimplementing it as a menu would be a worse copy of
+something already installed. So the project page asks it: a box under **Start
+work**, a question in your own words, and the answer arrives in a session you
+can keep talking to.
+
+Beside it, quietly: any workflow that ships its own chooser page, and the full
+list of what is installed. Both are read from the project's skills each time,
+so a BMAD upgrade that adds a workflow appears without amalgam being taught
+about it, and deprecated forwarding stubs are left out.
+
+A chooser — BMAD's brainstorming selector is the one that ships today — opens
+embedded rather than in a separate window. It was written to put a prompt on
+your clipboard for pasting back into a chat; the copy served here also hands
+the prompt straight to a session, so the step where you carry text between two
+windows the interface is already showing you does not need to happen. The file
+on disk is untouched and the clipboard still gets the text.
+
 ### Start work
 
 Four buttons for the four shapes of work people actually begin:

@@ -170,13 +170,22 @@
   .card:hover .remove, .remove:focus-visible { opacity: 1; }
   .remove:hover { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
 
-  /* A path is long and a card is not: it stays on one line and keeps the end,
-     which is the half that identifies the folder. */
+  /* A path is long and a card is not. It wraps rather than being cut, because
+     a truncated path is a path you cannot check — and checking which folder a
+     card means is most of what the line is for. Two lines at most, and the
+     ellipsis lands mid-path where a break is obvious, not at the end where it
+     hides the folder name. */
   .path {
     margin: .35rem 0 .6rem;
-    direction: rtl; text-align: left;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    line-height: 1.45;
   }
+  /* Anything still cut is one click from being whole. */
+  .card:hover .path { -webkit-line-clamp: unset; }
   /* Room for the button, so a long name never runs under it. */
   .title { padding-right: 2rem; }
 </style>

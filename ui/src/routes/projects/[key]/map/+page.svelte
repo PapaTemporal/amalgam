@@ -212,7 +212,8 @@
     {#if endpoints.length === 0}
       <p class="empty">Nothing matched.</p>
     {:else}
-      <table>
+      <div class="scroll">
+      <table class="contracts">
         <thead><tr><th>Route</th><th>Calls</th><th>Serves</th><th>Evidence</th></tr></thead>
         <tbody>
           {#each endpoints as e}
@@ -225,6 +226,7 @@
           {/each}
         </tbody>
       </table>
+      </div>
     {/if}
   </div>
 
@@ -273,4 +275,16 @@
   tr.clickable { cursor: pointer; }
   tr.clickable:hover td { background: var(--panel-2); }
   ul.plain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; }
+
+  /* File paths are long and there are four columns of them. Rather than
+     letting the table push the page sideways — which hides the right-hand
+     columns behind the edge of the window with no hint they are there — the
+     table scrolls inside its own box, and the two path columns wrap. */
+  .scroll { overflow-x: auto; }
+  table.contracts { width: 100%; table-layout: fixed; }
+  table.contracts th:nth-child(1), table.contracts td:nth-child(1) { width: 26%; }
+  table.contracts th:nth-child(2), table.contracts td:nth-child(2),
+  table.contracts th:nth-child(3), table.contracts td:nth-child(3) { width: 29%; }
+  table.contracts th:nth-child(4), table.contracts td:nth-child(4) { width: 16%; }
+  table.contracts td { overflow-wrap: anywhere; vertical-align: top; }
 </style>

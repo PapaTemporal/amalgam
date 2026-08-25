@@ -4,6 +4,7 @@
 import RemoveProject from "$lib/RemoveProject.svelte";
   import Modal from "$lib/Modal.svelte";
   import Session from "$lib/Session.svelte";
+  import AskBmad from "$lib/AskBmad.svelte";
   import { page } from "$app/state";
 
   const key = $derived(page.params.key);
@@ -93,6 +94,21 @@ import RemoveProject from "$lib/RemoveProject.svelte";
       job = u;
       if (u.state === "done") pages = await get("/graphpages", { key });
     });
+  }
+
+  /** Start a session on a prompt that did not come from the four buttons. */
+  async function startWith(prompt, title) {
+    starting = true;
+    startError = null;
+    try {
+      const out = await post("/session/start", { cwd: p.path, prompt, title, permissionMode });
+      flow = { id: "workflow", title };
+      sessionId = out.id;
+      const url = new URL(window.location.href);
+      url.searchParams.set("session", out.id);
+      history.replaceState({}, "", url);
+    } catch (e) { startError = e.message; }
+    starting = false;
   }
 
   async function runHere() {
@@ -238,6 +254,10 @@ import RemoveProject from "$lib/RemoveProject.svelte";
       <button class:primary={flow?.id === "fix"} onclick={() => startFlow("fix")}>Fix a bug</button>
       <button class:primary={flow?.id === "explore"} onclick={() => startFlow("explore")}>Understand this code</button>
     </div>
+
+    <!-- BMAD already answers "which workflow fits this?" — this asks it
+         rather than reimplementing it as a menu. -->
+    <AskBmad projectKey={key} onstart={startWith} />
 
     {#if sessionId}
       <div class="flow">
