@@ -135,12 +135,16 @@ Everything about one codebase on one page.
   to filter and search and a panel that inspects one.
 
   The button is there as soon as a graph exists, whether or not a picture has
-  been drawn yet, and opens a panel naming every repository and its state:
-  drawn, not drawn, or too large to draw. **Draw it** runs the clustering pass
-  alone — the symbols and edges already exist, so it is seconds rather than
-  the minutes a rebuild costs. A repository past a few thousand symbols is
-  clustered but never drawn, because a browser cannot usefully lay out that
-  many nodes; use **Explore** for those, which is built for the size.
+  been drawn yet, and opens a panel naming every repository and whether it is
+  drawn. **Draw it** runs the clustering pass alone — the symbols and edges
+  already exist, so it is seconds rather than the minutes a rebuild costs.
+
+  Size is not a reason to skip it. graphify draws the graph at the scale of
+  its communities rather than its symbols, so a 95,826-symbol repository is a
+  2.8 MB page that opens in about a second. It takes a minute or two to build
+  and the panel says so, but a large graph is exactly the one worth having:
+  you land on the whole thing and filter down with the sidebar, and there is
+  nothing to filter if it was never drawn.
 
   The page fetches its drawing library from a CDN, so the first time it would
   need the internet the panel offers to keep a 686 KB copy locally; after that
@@ -299,6 +303,21 @@ Refresh it with **Rescan**, or `amalgam contracts` from a terminal. These edges
 are inferred, never mixed into the parsed `calls` edges, and re-verified against
 the source before being shown — a match whose literal has since moved is
 dropped rather than reported.
+
+### Map
+
+One box per repository, with the contracts between them as arrows. Click a
+service and the map re-centres on it: what calls it on the left, the service
+in the middle, what it calls on the right. The geometry carries the direction,
+so nothing has to be read off an arrowhead.
+
+Services outside the project appear too, dashed, named from how the calling
+code addresses them — `${PAYMENTS_URL}` becomes **payments**, which is the
+only identity a configured host leaves in the source. They are not clickable,
+because there is nothing here to open.
+
+Each service view carries a **Diagram** link to that repository's own
+interactive graph.
 
 ### Explore
 

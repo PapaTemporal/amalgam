@@ -12,10 +12,38 @@
   let showOrphans = $state(false);
   let showStrays = $state(false);
 
+  const focus = $derived(page.url.searchParams.get("service") ?? "");
+
   async function load() {
-    try { map = await get("/map", { key }); } catch (e) { error = e.message; }
+    try { map = await get("/map", { key, service: focus }); } catch (e) { error = e.message; }
   }
-  $effect(() => { if (key && !map && !error) load(); });
+  // Reloads when the focus changes, because that is a different question.
+  let loadedFor = $state(null);
+  $effect(() => {
+    if (!key || error) return;
+    if (loadedFor === focus && map) return;
+    loadedFor = focus;
+    map = null;
+    load();
+  });
+
+  /**
+   * Open a service's own neighbourhood.
+   *
+   * The whole-project picture looks the same whichever service you came from,
+   * which made opening one feel like nothing had happened. Clicking a box now
+   * re-centres on it: what calls into it on one side, what it calls on the
+   * other. Clicking the one already in the middle steps back out.
+   */
+  function focusOn(node) {
+    if (node.kind === "external") return;   // nothing of ours to show inside it
+    const url = new URL(window.location.href);
+    if (node.id === focus) url.searchParams.delete("service");
+    else url.searchParams.set("service", node.id);
+    url.searchParams.delete("flow");
+    history.pushState({}, "", url);
+    flow = null;
+  }
 
   async function refresh() {
     busy = true;
@@ -79,10 +107,32 @@
   // Room for the self-loop, which is drawn above the node and was reaching off
   // the top of the canvas in the single-service case — the case every project
   // starts in.
-  const H = $derived((map?.nodes.length ?? 1) <= 2 ? 200 : 320);
+  const H = $derived.by(() => {
+    const n = map?.nodes ?? [];
+    if (map?.focus) {
+      const widest = Math.max(1, ...["upstream", "focus", "downstream"]
+        .map((r) => n.filter((x) => x.role === r).length));
+      return Math.max(220, widest * 70 + 60);
+    }
+    return n.length <= 2 ? 200 : 320;
+  });
   const positions = $derived.by(() => {
     const nodes = map?.nodes ?? [];
     const pos = new Map();
+    // With a service in focus the geometry carries the meaning: callers on the
+    // left, the service in the middle, what it calls on the right. Nobody has
+    // to read an arrowhead to know which way anything goes.
+    if (map?.focus) {
+      const col = (role) => nodes.filter((n) => n.role === role);
+      const place = (list, x) => {
+        const top = (H - list.length * 70) / 2 + 35;
+        list.forEach((n, i) => pos.set(n.id, { x, y: top + i * 70 }));
+      };
+      place(col("upstream"), 130);
+      place(col("focus"), W / 2);
+      place(col("downstream"), W - 130);
+      return pos;
+    }
     if (nodes.length === 1) pos.set(nodes[0].id, { x: W / 2, y: H / 2 + 30 });
     else if (nodes.length === 2) {
       pos.set(nodes[0].id, { x: 170, y: H / 2 + 20 });
@@ -133,15 +183,24 @@
 <header class="page">
   <div class="spread">
     <div>
-      <h1>Map</h1>
+      <h1>Map{#if map?.focus} · <span class="mono">{map.focus}</span>{/if}</h1>
       <div class="sub">
-        {#if map}
-          {map.nodes.length} service(s), {map.endpoints.length} contract(s) between code that calls a route and code that serves it
-        {:else}reading…{/if}
+        {#if !map}reading…
+        {:else if map.focus}
+          What calls {map.focus}, and what it calls. Click a box to move; click {map.focus} to step back out.
+        {:else}
+          {map.nodes.length} service(s), {map.endpoints.length} contract(s) between code that calls a route and code that serves it.
+          Click a service to see only its neighbourhood.
+        {/if}
       </div>
     </div>
     <div class="row">
       <a class="btn" href={`/projects/${key}`}>Back to project</a>
+      {#if map?.focus}
+        <a class="btn" href={`/projects/${key}/map`}>Whole project</a>
+        <a class="btn" target="_blank" rel="noreferrer"
+           href={`/graph/${key}/${map.focus}`}>Diagram</a>
+      {/if}
       <button onclick={refresh} disabled={busy}>{busy ? "Scanning…" : "Rescan"}</button>
     </div>
   </div>
@@ -157,10 +216,14 @@
         <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
           <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)" />
         </marker>
+        <marker id="arrow-out" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--ink-faint)" />
+        </marker>
       </defs>
 
       {#each map.links as link}
-        <path d={edgePath(link)} class="link" marker-end="url(#arrow)" />
+        <path d={edgePath(link)} class="link" class:external={link.kind === "external"}
+              marker-end={link.kind === "external" ? "url(#arrow-out)" : "url(#arrow)"} />
         {#if positions.get(link.from) && positions.get(link.to)}
           {@const a = positions.get(link.from)}
           {@const b = positions.get(link.to)}
@@ -174,13 +237,24 @@
 
       {#each map.nodes as node}
         {@const p = positions.get(node.id)}
-        <g class="node">
-          <rect x={p.x - 78} y={p.y - 22} width="156" height="44" rx="8" />
-          <text class="name" x={p.x} y={p.y - 2}>{node.label}</text>
-          <text class="meta" x={p.x} y={p.y + 14}>
-            {node.symbols ? `${node.symbols.toLocaleString()} symbols` : "no graph"}
-          </text>
-        </g>
+        {#if p}
+          <g class="node {node.kind}" class:focus={node.role === "focus"}
+             onclick={() => focusOn(node)} role="button" tabindex="0"
+             onkeydown={(e) => e.key === "Enter" && focusOn(node)}>
+            <title>
+              {node.kind === "external"
+                ? `${node.label} — outside this project`
+                : node.id === map.focus ? `${node.label} — click to see the whole project`
+                : `${node.label} — click to centre on it`}
+            </title>
+            <rect x={p.x - 78} y={p.y - 22} width="156" height="44" rx="8" />
+            <text class="name" x={p.x} y={p.y - 2}>{node.label}</text>
+            <text class="meta" x={p.x} y={p.y + 14}>
+              {node.kind === "external" ? "outside this project"
+                : node.symbols ? `${node.symbols.toLocaleString()} symbols` : "no graph"}
+            </text>
+          </g>
+        {/if}
       {/each}
     </svg>
     <p class="tiny faint" style="margin:0">
@@ -326,7 +400,15 @@
   .link { fill: none; stroke: var(--accent); stroke-width: 1.5; opacity: .55; }
   .link-label { fill: var(--ink-faint); font-size: 11px; text-anchor: middle;
                 paint-order: stroke; stroke: var(--panel); stroke-width: 4px; stroke-linejoin: round; }
+  .node { cursor: pointer; }
+  .node.external { cursor: default; }
   .node rect { fill: var(--panel-2); stroke: var(--line); }
+  .node:not(.external):hover rect { stroke: var(--ink-faint); }
+  .node.focus rect { fill: color-mix(in srgb, var(--accent) 20%, var(--panel-2)); stroke: var(--accent); }
+  /* Outside this project: dashed, because nothing inside can be said about it. */
+  .node.external rect { fill: none; stroke: var(--ink-faint); stroke-dasharray: 5 4; }
+  .node.external .name { fill: var(--ink-faint); }
+  .link.external { stroke: var(--ink-faint); stroke-dasharray: 5 4; }
   .node .name { fill: var(--ink); font-size: 13px; font-weight: 600; text-anchor: middle; }
   .node .meta { fill: var(--ink-faint); font-size: 10px; text-anchor: middle; }
 

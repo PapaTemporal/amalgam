@@ -83,7 +83,7 @@ import RemoveProject from "$lib/RemoveProject.svelte";
   $effect(() => { if (key && !pages) get("/graphpages", { key }).then((g) => (pages = g)).catch(() => {}); });
   const drawn = $derived((pages?.services ?? []).filter((s) => s.hasPage));
   let showDiagrams = $state(false);
-  const undrawn = $derived((pages?.services ?? []).filter((s) => !s.hasPage && !s.tooLarge));
+  const undrawn = $derived((pages?.services ?? []).filter((s) => !s.hasPage));
 
   /**
    * Draw the graph that is already built.
@@ -397,30 +397,23 @@ import RemoveProject from "$lib/RemoveProject.svelte";
           {#if svc.hasPage}
             <a class="btn" target="_blank" rel="noreferrer"
                href={`/graph/${key}${p.workspace ? `/${svc.service}` : ""}`}>{svc.service}</a>
-          {:else if svc.tooLarge}
-            <span class="pending tiny"
-                  title={`${svc.symbols.toLocaleString()} symbols — clustered, but no browser can usefully draw that`}>
-              {svc.service} · too large to draw
-            </span>
           {:else}
-            <span class="pending tiny" title="No page yet — drawing takes seconds, the graph is already built">
-              {svc.service} · not drawn
+            <span class="pending tiny"
+                  title={svc.slow
+                    ? `${svc.symbols.toLocaleString()} symbols — drawing this one takes a minute or two`
+                    : "No page yet — drawing takes seconds, the graph is already built"}>
+              {svc.service} · not drawn{#if svc.slow} · slow{/if}
             </span>
           {/if}
         {/each}
       </div>
 
-      {#if (pages?.services ?? []).some((s) => s.tooLarge)}
-        <p class="tiny faint" style="margin:.6rem 0 0">
-          A repository past a few thousand symbols is clustered but not drawn — its communities
-          are real and everything else uses them, but a browser cannot usefully lay out that many
-          nodes. Use <strong>Explore</strong> for those: it is built for the size.
-        </p>
-      {/if}
       {#if undrawn.length}
         <p class="tiny faint" style="margin:.6rem 0 0">
-          Drawing is the clustering pass only — the symbols and edges already exist, so it takes
-          seconds rather than the minutes a rebuild would.
+          Drawing is the clustering pass only — the symbols and edges already exist, so it is
+          seconds rather than the minutes a rebuild would cost. A very large repository takes a
+          minute or two, and is drawn at the scale of its communities rather than its symbols,
+          which is what keeps it openable.
         </p>
       {/if}
     </div>

@@ -702,10 +702,16 @@ function buildOneGraph(dir, { sql = false, label = false } = {}) {
  */
 function clusterOneGraph(dir, { label = false } = {}) {
   const nodes = countNodes(dir);
-  // graphify's own guidance: past a few thousand nodes the interactive page is
-  // no longer something a browser enjoys, and the clustering is worth having
-  // without it.
-  const heavy = nodes > 5000;
+  // Drawn whatever the size.
+  //
+  // This used to skip the picture past a few thousand nodes, on the reasoning
+  // that no browser could lay out a hundred thousand of them. Measured rather
+  // than assumed, that was wrong twice: graphify draws the graph at the scale
+  // of its communities rather than its symbols, so a 95,826-symbol repository
+  // becomes a 2.8 MB page that renders in about a second — and a large graph
+  // is exactly the one worth having, because the whole point is to land on it
+  // and filter down. Skipping it produced nothing to filter.
+  const heavy = nodes > 20000;
   const args = ["tool", "run", "--from", "graphifyy", "graphify", "cluster-only", "."];
   const env = { ...process.env };
 
@@ -724,13 +730,13 @@ function clusterOneGraph(dir, { label = false } = {}) {
   } else {
     args.push("--no-label");
   }
-  if (heavy) args.push("--no-viz");
+  if (heavy) console.log(`  (${nodes.toLocaleString()} nodes — this takes a minute or two)`);
   const r = spawnSync("uv", args, { cwd: dir, encoding: "utf8", windowsHide: true, env });
   if (r.status !== 0) {
     console.log(`  no communities: ${(r.stderr ?? "").split("\n").find(Boolean) ?? "clustering failed"}`);
     return false;
   }
-  console.log(`  communities -> ${heavy ? "clustered (page skipped, too large to draw)" : "clustered, graph.html written"}${label ? ", named locally" : ""}`);
+  console.log(`  communities -> clustered, graph.html written${label ? ", named locally" : ""}`);
   return true;
 }
 
