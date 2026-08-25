@@ -173,6 +173,33 @@ If a card cannot do its job it says why rather than sitting at "none" —
 `uv` missing, a service whose graph was built before the index existed, or a
 folder that has no repositories in it yet.
 
+### Start work
+
+Tasks, not command names. *Work on a story*, *Fix a bug*, *Investigate an
+issue*, *What is ready to ship?* — the things somebody knows they are doing
+when they sit down. Which workflow serves one is the framework's business:
+several of these run the same command, because the difference between fixing
+a bug and picking up a story is what you tell it, not which machinery runs.
+
+Grouped by the hats a small team wears — get work done, look into something,
+start something new, check the work, ship it, think it through — because on a
+team of one all of those are the same afternoon.
+
+Picking a task **prefills**; it does not send. What runs is a line you can
+read and edit before pressing Run, so the interface and a terminal do the same
+thing and you can always see which. The card says what each one runs for
+anyone who wants to know.
+
+What the agent is allowed to do is chosen up top — read only, edit files, or
+anything — in the words of what it permits rather than as a mode name.
+
+A few tasks run against amalgam's own tools rather than a workflow, because
+"what would break if I changed this" is a graph question and routing it
+through a planning workflow would be a worse answer. Those say so.
+
+Anything whose workflow is not installed is not offered, so a BMAD upgrade
+that renames or removes one leaves no dead button behind.
+
 ### Asking which workflow fits
 
 BMAD already answers "what should I run for this?" — that is what

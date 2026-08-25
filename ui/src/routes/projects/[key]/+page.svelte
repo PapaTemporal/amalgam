@@ -4,7 +4,7 @@
 import RemoveProject from "$lib/RemoveProject.svelte";
   import Modal from "$lib/Modal.svelte";
   import Session from "$lib/Session.svelte";
-  import AskBmad from "$lib/AskBmad.svelte";
+  import StartWork from "$lib/StartWork.svelte";
   import { page } from "$app/state";
 
   const key = $derived(page.params.key);
@@ -14,8 +14,6 @@ import RemoveProject from "$lib/RemoveProject.svelte";
   let error = $state(null);
   let job = $state(null);
   let jobLabel = $state("");
-  let flow = $state(null);
-  let copied = $state(false);
 
   async function load() {
     try {
@@ -96,13 +94,20 @@ import RemoveProject from "$lib/RemoveProject.svelte";
     });
   }
 
-  /** Start a session on a prompt that did not come from the four buttons. */
+  /**
+   * Run something, whatever picked it.
+   *
+   * A task, a chooser's prompt, or BMAD's own help all arrive here the same
+   * way: a line of text and a name for the session. There is no composing step
+   * left, because the thing that runs is the thing you read.
+   */
+  let sessionTitle = $state("Session");
   async function startWith(prompt, title) {
     starting = true;
     startError = null;
     try {
       const out = await post("/session/start", { cwd: p.path, prompt, title, permissionMode });
-      flow = { id: "workflow", title };
+      sessionTitle = title ?? "Session";
       sessionId = out.id;
       const url = new URL(window.location.href);
       url.searchParams.set("session", out.id);
@@ -111,21 +116,6 @@ import RemoveProject from "$lib/RemoveProject.svelte";
     starting = false;
   }
 
-  async function runHere() {
-    if (!flow) return;
-    starting = true;
-    startError = null;
-    try {
-      const out = await post("/session/start", {
-        cwd: p.path, prompt: flow.prompt, title: flow.title, permissionMode,
-      });
-      sessionId = out.id;
-      const url = new URL(window.location.href);
-      url.searchParams.set("session", out.id);
-      history.replaceState({}, "", url);
-    } catch (e) { startError = e.message; }
-    starting = false;
-  }
 
   function closeSession() {
     sessionId = null;
@@ -191,27 +181,8 @@ import RemoveProject from "$lib/RemoveProject.svelte";
     });
   }
 
-  async function startFlow(kind) {
-    flow = await post("/flow/compose", { key, flow: kind });
-    copied = false;
-    // Deep-linkable, so a composed prompt can be bookmarked or sent to
-    // somebody else rather than described to them.
-    const url = new URL(window.location.href);
-    url.searchParams.set("flow", kind);
-    history.replaceState({}, "", url);
-  }
 
-  // Opening /projects/<key>?flow=feature composes it immediately.
-  let autoFlow = $state(false);
-  $effect(() => {
-    const wanted = page.url.searchParams.get("flow");
-    if (data && wanted && !autoFlow) { autoFlow = true; startFlow(wanted); }
-  });
 
-  async function copyPrompt() {
-    await navigator.clipboard.writeText(flow.prompt);
-    copied = true;
-  }
 
   const p = $derived(data?.project);
   const unproven = $derived(insight?.trace?.summary?.unproven ?? []);
@@ -221,19 +192,24 @@ import RemoveProject from "$lib/RemoveProject.svelte";
 {#if error}
   <div class="card"><strong>{error}</strong><p class="tiny muted"><a href="/">Back to projects</a></p></div>
 {:else if data}
-  <header class="page">
-    {#if p.viewingService}
-      <p class="tiny muted" style="margin:0 0 .35rem">
-        <button class="ghost tiny" onclick={backToProject}>← {p.parentName}</button>
-        <span class="faint">viewing one service — it is not on your project list</span>
-      </p>
-    {/if}
+  <header class="page" class:service={p.viewingService}>
     <div class="spread">
       <div>
+        {#if p.viewingService}
+          <!-- A breadcrumb, not a footnote. A service page is otherwise
+               indistinguishable from a project page, which leaves you unsure
+               which of the two you are acting on. -->
+          <nav class="crumbs tiny">
+            <button class="crumb" onclick={backToProject}>{p.parentName}</button>
+            <span class="sep">/</span>
+            <span class="here">{p.name}</span>
+          </nav>
+        {/if}
         <h1>{p.name}</h1>
         <div class="sub mono tiny">{p.path}</div>
       </div>
       <div class="row">
+        {#if p.viewingService}<span class="pill accent">one repository</span>{/if}
         {#if p.branch}<span class="pill">{p.branch}</span>{/if}
         {#if p.dirtyFiles > 0}<span class="pill warn">{p.dirtyFiles} uncommitted</span>{/if}
         {#if !p.viewingService}
@@ -241,78 +217,59 @@ import RemoveProject from "$lib/RemoveProject.svelte";
         {/if}
       </div>
     </div>
+
+    {#if p.viewingService}
+      <p class="tiny muted note">
+        Everything here is scoped to this repository alone — its graph, its checks, work started
+        from it. The project's own totals, the links between its services and its planning
+        documents live one level up, in
+        <button class="linkish" onclick={backToProject}>{p.parentName}</button>.
+        This page is not on your project list and removing it is done from there.
+      </p>
+    {/if}
   </header>
 
-  <!-- What the agent can be asked to do. The three shapes of work people
-       actually start: something new, something already specified, or a look
-       at what is already there. -->
+  <!-- What you sat down to do. Tasks, not command names: which workflow
+       serves one is the framework's business, and the same command backs
+       several of these. -->
   <div class="card" style="margin-bottom:1.25rem">
-    <h2>Start work</h2>
-    <div class="row">
-      <button class:primary={!flow || flow.id === "feature"} onclick={() => startFlow("feature")}>New feature</button>
-      <button class:primary={flow?.id === "story"} onclick={() => startFlow("story")}>Continue a story</button>
-      <button class:primary={flow?.id === "fix"} onclick={() => startFlow("fix")}>Fix a bug</button>
-      <button class:primary={flow?.id === "explore"} onclick={() => startFlow("explore")}>Understand this code</button>
+    <div class="spread">
+      <h2 style="margin:0">Start work</h2>
+      {#if agent?.cli}
+        <div class="row tiny">
+          <span class="faint">it may</span>
+          {#each agent.modes as m}
+            <button class="chip" class:on={permissionMode === m.id}
+                    title={m.note} onclick={() => (permissionMode = m.id)}>{m.label}</button>
+          {/each}
+        </div>
+      {/if}
     </div>
 
-    <!-- BMAD already answers "which workflow fits this?" — this asks it
-         rather than reimplementing it as a menu. -->
-    <AskBmad projectKey={key} onstart={startWith} />
+    {#if agent && !agent.cli}
+      <div class="noagent">
+        <strong class="tiny">No agent CLI on this machine.</strong>
+        <p class="tiny muted" style="margin:.3rem 0 .5rem">
+          With one installed these run here and you watch them work — questions, tool calls and
+          all. Without one there is nothing to drive.
+        </p>
+        <a class="btn" href="/setup">Install it</a>
+      </div>
+    {/if}
+
+    <div style="margin-top:.7rem">
+      <StartWork projectKey={key} onstart={startWith} disabled={starting || !agent?.cli} />
+    </div>
+
+    {#if startError}<p class="tiny" style="color:var(--bad);margin-top:.5rem">{startError}</p>{/if}
 
     {#if sessionId}
       <div class="flow">
         <div class="spread" style="margin-bottom:.5rem">
-          <strong>{flow?.title ?? "Session"}</strong>
+          <strong>{sessionTitle}</strong>
           <button class="ghost" onclick={closeSession}>Close</button>
         </div>
         <Session id={sessionId} />
-      </div>
-
-    {:else if flow}
-      <div class="flow">
-        <div class="spread">
-          <strong>{flow.title}</strong>
-          <button class="ghost" onclick={() => (flow = null)}>Close</button>
-        </div>
-        <p class="tiny muted" style="margin:.4rem 0">{flow.explain}</p>
-
-        {#if agent?.cli}
-          <!-- The permission mode is the one setting here with real
-               consequences, so it is a choice made before starting rather
-               than a default buried in a config file. -->
-          <div class="modes">
-            {#each agent.modes as m}
-              <label class="mode" class:on={permissionMode === m.id}>
-                <input type="radio" bind:group={permissionMode} value={m.id} />
-                <span><strong>{m.label}</strong><br /><span class="tiny muted">{m.note}</span></span>
-              </label>
-            {/each}
-          </div>
-          <div class="row" style="margin-top:.6rem">
-            <button class="primary" onclick={runHere} disabled={starting}>
-              {starting ? "Starting…" : "Run it here"}
-            </button>
-            <button onclick={copyPrompt}>{copied ? "Copied" : "Copy prompt instead"}</button>
-          </div>
-        {:else}
-          <div class="noagent">
-            <strong class="tiny">No agent CLI on this machine.</strong>
-            <p class="tiny muted" style="margin:.3rem 0 .5rem">
-              With one installed, this runs here and you watch it work — questions, tool calls and
-              all. Without one, the prompt is yours to paste somewhere else.
-            </p>
-            <div class="row">
-              <a class="btn" href="/setup">Install it</a>
-              <button onclick={copyPrompt}>{copied ? "Copied" : "Copy prompt"}</button>
-            </div>
-          </div>
-        {/if}
-
-        {#if startError}<p class="tiny" style="color:var(--bad)">{startError}</p>{/if}
-        <details class="peek">
-          <summary class="tiny faint">What it will be told</summary>
-          <pre class="out">{flow.prompt}</pre>
-        </details>
       </div>
     {/if}
   </div>
@@ -424,7 +381,7 @@ import RemoveProject from "$lib/RemoveProject.svelte";
     </div>
   {/if}
 
-  {#if p.services.length || (p.exists && !p.isRepo)}
+  {#if !p.viewingService && (p.services.length || (p.exists && !p.isRepo))}
     <div class="card" style="margin-bottom:1.25rem">
       <div class="spread">
         <h2 style="margin:0">Services</h2>
@@ -591,16 +548,8 @@ import RemoveProject from "$lib/RemoveProject.svelte";
 
 <style>
   table.hidden { display: none; }
-  .modes { display: flex; flex-direction: column; gap: .4rem; margin-top: .5rem; }
-  .mode { display: flex; gap: .6rem; align-items: flex-start; cursor: pointer;
-          padding: .4rem .5rem; border: 1px solid transparent; border-radius: 6px; }
-  .mode:hover { background: var(--panel-2); }
-  .mode.on { border-color: var(--accent); background: var(--panel-2); }
-  .mode input { margin-top: .25rem; }
   .noagent { border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--line));
              border-radius: 8px; padding: .7rem .8rem; margin-top: .5rem; }
-  .peek { margin-top: .6rem; }
-  .peek summary { cursor: pointer; }
   .row-actions { text-align: right; width: 1%; white-space: nowrap; }
   .linky { background: none; border: none; color: var(--ink-faint); font-size: .78rem;
            cursor: pointer; padding: .2rem .35rem; border-radius: 4px; }
@@ -610,6 +559,22 @@ import RemoveProject from "$lib/RemoveProject.svelte";
   button.danger.primary { background: var(--bad); border-color: var(--bad); color: #1a0808; }
   .addrepo { display: flex; flex-direction: column; gap: .5rem; margin-top: .75rem;
              border-top: 1px solid var(--line); padding-top: .75rem; }
+  /* A service is a place inside something, and the page should feel like one:
+     a rail down the side, a breadcrumb, and a sentence saying where "up" is. */
+  header.service { border-left: 3px solid var(--accent); padding-left: .9rem;
+                   margin-left: -.9rem; }
+  .crumbs { display: flex; align-items: center; gap: .4rem; margin-bottom: .2rem; }
+  .crumb { background: none; border: none; padding: 0; cursor: pointer; color: var(--ink-faint);
+           font-size: .78rem; }
+  .crumb:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+  .crumbs .sep { color: var(--ink-faint); }
+  .crumbs .here { color: var(--ink-dim); font-size: .78rem; }
+  .pill.accent { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+  header .note { margin: .6rem 0 0; max-width: 74ch; }
+  .linkish { background: none; border: none; padding: 0; cursor: pointer; color: var(--accent);
+             font: inherit; }
+  .linkish:hover { text-decoration: underline; text-underline-offset: 3px; }
+
   .flow { margin-top: .9rem; border-top: 1px solid var(--line); padding-top: .9rem; }
   .bad-edge { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
   /* Wrapped rather than scrolled: the whole point of showing the prompt is

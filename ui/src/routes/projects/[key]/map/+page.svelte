@@ -9,6 +9,8 @@
   let flow = $state(null);
   let busy = $state(false);
   let filter = $state("");
+  let showOrphans = $state(false);
+  let showStrays = $state(false);
 
   async function load() {
     try { map = await get("/map", { key }); } catch (e) { error = e.message; }
@@ -39,11 +41,32 @@
     if (map && wanted && !auto) { auto = true; openFlow(wanted); }
   });
 
-  const endpoints = $derived(
-    (map?.endpoints ?? []).filter((e) =>
-      !filter || e.path.includes(filter.toLowerCase()) ||
-      (e.from.file + e.to.file).toLowerCase().includes(filter.toLowerCase()))
-  );
+  /**
+   * Test and benchmark code, which is real but is not the system.
+   *
+   * A suite that exercises every endpoint doubles this list with rows that
+   * say nothing about how the product is wired — and on a large project that
+   * is most of what is on screen. They are still here, one click away, since
+   * "which test hits this route" is a fair question; they are just not the
+   * first thing between you and the answer.
+   */
+  const isSupport = (file) =>
+    /(^|\/)(tests?|spec|specs|__tests__|e2e|bench|benchmarks?|fixtures?|examples?|mocks?)\//i.test(file)
+    || /[._-](test|spec|bench)\.[a-z]+$/i.test(file);
+
+  const matches = (e) =>
+    !filter || e.path.includes(filter.toLowerCase())
+    || (e.from.file + e.to.file).toLowerCase().includes(filter.toLowerCase());
+
+  const all = $derived((map?.endpoints ?? []).filter(matches));
+  const endpoints = $derived(all.filter((e) => !isSupport(e.from.file) && !isSupport(e.to.file)));
+  const support = $derived(all.filter((e) => isSupport(e.from.file) || isSupport(e.to.file)));
+
+  // A page is not a database dump. Long lists get a lid and a way to lift it.
+  const PAGE = 40;
+  let showAll = $state(false);
+  let showSupport = $state(false);
+  const shown = $derived(showAll ? endpoints : endpoints.slice(0, PAGE));
 
   // --- layout -------------------------------------------------------------
   // Deterministic rather than force-directed: a diagram that settles somewhere
@@ -206,17 +229,21 @@
 
   <div class="card" style="margin-bottom:1.25rem">
     <div class="spread" style="margin-bottom:.5rem">
-      <h2 style="margin:0">Contracts</h2>
+      <h2 style="margin:0">Contracts
+        <span class="tiny faint" style="font-weight:400">
+          {endpoints.length}{support.length ? ` · ${support.length} in tests` : ""}
+        </span>
+      </h2>
       <input type="search" bind:value={filter} placeholder="filter by path or file…" style="max-width:280px" />
     </div>
-    {#if endpoints.length === 0}
+    {#if endpoints.length === 0 && support.length === 0}
       <p class="empty">Nothing matched.</p>
     {:else}
       <div class="scroll">
       <table class="contracts">
         <thead><tr><th>Route</th><th>Calls</th><th>Serves</th><th>Evidence</th></tr></thead>
         <tbody>
-          {#each endpoints as e}
+          {#each shown as e}
             <tr class="clickable" onclick={() => openFlow(e.path)}>
               <td><span class="pill">{e.method ?? "ANY"}</span> <span class="mono">{e.path}</span></td>
               <td class="tiny muted mono">{e.from.file}:{e.from.line}</td>
@@ -227,6 +254,34 @@
         </tbody>
       </table>
       </div>
+
+      {#if endpoints.length > PAGE}
+        <button class="more" onclick={() => (showAll = !showAll)}>
+          {showAll ? `Show the first ${PAGE}` : `Show all ${endpoints.length}`}
+        </button>
+      {/if}
+
+      {#if support.length}
+        <button class="more" onclick={() => (showSupport = !showSupport)} aria-expanded={showSupport}>
+          {showSupport ? "Hide" : "Show"} {support.length} more from tests and fixtures
+        </button>
+        {#if showSupport}
+          <div class="scroll" style="margin-top:.5rem">
+          <table class="contracts">
+            <tbody>
+              {#each support as e}
+                <tr class="clickable" onclick={() => openFlow(e.path)}>
+                  <td><span class="pill">{e.method ?? "ANY"}</span> <span class="mono">{e.path}</span></td>
+                  <td class="tiny muted mono">{e.from.file}:{e.from.line}</td>
+                  <td class="tiny muted mono">{e.to.file}:{e.to.line}</td>
+                  <td class="tiny faint">{e.confidence}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+          </div>
+        {/if}
+      {/if}
     {/if}
   </div>
 
@@ -236,10 +291,15 @@
         <h2>Routes nothing calls</h2>
         <p class="tiny faint" style="margin-top:-.4rem">Dead, or called from outside this project.</p>
         <ul class="plain tiny mono">
-          {#each map.orphanRoutes.slice(0, 12) as o}
+          {#each map.orphanRoutes.slice(0, showOrphans ? 200 : 8) as o}
             <li>{o.method ?? "ANY"} {o.path} <span class="faint">· {o.file}:{o.line}</span></li>
           {/each}
         </ul>
+        {#if map.orphanRoutes.length > 8}
+          <button class="more" onclick={() => (showOrphans = !showOrphans)}>
+            {showOrphans ? "Fewer" : `All ${map.orphanRoutes.length}`}
+          </button>
+        {/if}
       </div>
     {/if}
     {#if map.orphanCalls.length}
@@ -247,10 +307,15 @@
         <h2>Calls to nothing here</h2>
         <p class="tiny faint" style="margin-top:-.4rem">An external service, or a route built at run time.</p>
         <ul class="plain tiny mono">
-          {#each map.orphanCalls.slice(0, 12) as o}
+          {#each map.orphanCalls.slice(0, showStrays ? 200 : 8) as o}
             <li>{o.path} <span class="faint">· {o.file}:{o.line}</span></li>
           {/each}
         </ul>
+        {#if map.orphanCalls.length > 8}
+          <button class="more" onclick={() => (showStrays = !showStrays)}>
+            {showStrays ? "Fewer" : `All ${map.orphanCalls.length}`}
+          </button>
+        {/if}
       </div>
     {/if}
   </div>
@@ -281,6 +346,9 @@
      columns behind the edge of the window with no hint they are there — the
      table scrolls inside its own box, and the two path columns wrap. */
   .scroll { overflow-x: auto; }
+  .more { margin-top: .55rem; background: none; border: 1px solid var(--line); border-radius: 6px;
+          color: var(--ink-faint); font-size: .76rem; padding: .25rem .6rem; cursor: pointer; }
+  .more:hover { color: var(--ink); border-color: var(--ink-faint); }
   table.contracts { width: 100%; table-layout: fixed; }
   table.contracts th:nth-child(1), table.contracts td:nth-child(1) { width: 26%; }
   table.contracts th:nth-child(2), table.contracts td:nth-child(2),
