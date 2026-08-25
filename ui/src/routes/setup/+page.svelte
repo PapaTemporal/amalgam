@@ -20,13 +20,23 @@
   let embeddings = $state(true);
   let model = $state(false);
 
+  // The agent CLI is the one install that is not amalgam's own, and the one
+  // without which the interface can only ever hand you a prompt to paste.
+  let agent = $state(null);
+  const loadAgent = () => get("/agent").then((a) => (agent = a)).catch(() => {});
+
+  async function installAgent() {
+    const { jobId } = await post("/agent/install", {});
+    follow(jobId, "Installing the agent CLI");
+  }
+
   // Both reads land before anything renders. Showing the page as soon as one
   // of them arrives is why the checkboxes used to settle a second apart —
   // semantic recall ticking itself, then the local model following, which
   // reads as the page changing its mind rather than as data arriving.
   let ready = $state(false);
   async function load() {
-    const [s] = await Promise.all([get("/state"), refreshInstall()]);
+    const [s] = await Promise.all([get("/state"), refreshInstall(), loadAgent()]);
     state = s;
     model = s.model;
     embeddings = s.embeddings || embeddings;
@@ -60,6 +70,9 @@
       job = u;
       if (u.state === "done") {
         state = null;
+        // PATH may have gained the agent; the cached lookup has to be dropped
+        // or it would keep saying "not installed" until a restart.
+        await post("/agent/rescan", {}).catch(() => {});
         await load();
         if (isUpdate(u)) reloadAfterUpdate();
       }
@@ -158,6 +171,38 @@
         {/if}
       </p>
     {/if}
+  </div>
+{/if}
+
+{#if agent && !agent.cli}
+  <div class="card edge-warn" style="margin-bottom:1.25rem">
+    <div class="spread">
+      <div>
+        <strong>No agent CLI on this machine.</strong>
+        <p class="tiny muted" style="margin:.4rem 0 0;max-width:60ch">
+          amalgam can run the work for you — start a task, watch the agent think, answer the
+          questions it asks, see the result — but only if there is an agent it can drive. Without
+          one, every workflow ends at a prompt for you to paste somewhere else.
+        </p>
+      </div>
+      <button class="primary" onclick={installAgent} disabled={job?.state === "running"}>Install it</button>
+    </div>
+    <p class="tiny faint" style="margin:.6rem 0 0">
+      Runs <code>npm install -g @anthropic-ai/claude-code</code>. Needs npm on your PATH.
+    </p>
+  </div>
+{:else if agent?.cli}
+  <div class="card" style="margin-bottom:1.25rem">
+    <div class="spread">
+      <div>
+        <span class="label">Agent</span>
+        <p class="tiny muted" style="margin:.35rem 0 0">
+          Workflows run here and report back — questions, tool calls and results — instead of
+          handing you a prompt.
+        </p>
+      </div>
+      <span class="pill good mono tiny">{agent.cli}</span>
+    </div>
   </div>
 {/if}
 

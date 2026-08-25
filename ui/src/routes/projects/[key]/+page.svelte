@@ -3,6 +3,7 @@
   import Stepper from "$lib/Stepper.svelte";
 import RemoveProject from "$lib/RemoveProject.svelte";
   import Modal from "$lib/Modal.svelte";
+  import Session from "$lib/Session.svelte";
   import { page } from "$app/state";
 
   const key = $derived(page.params.key);
@@ -67,6 +68,38 @@ import RemoveProject from "$lib/RemoveProject.svelte";
   // Deep-linkable the same way the map's flows are, so "here is what removing
   // this would delete" can be sent to somebody rather than described.
   let removing = $state(page.url.searchParams.get("remove") !== null);
+
+  // Running the work here, rather than handing over a prompt to run elsewhere.
+  let agent = $state(null);            // what this machine can drive
+  let sessionId = $state(page.url.searchParams.get("session"));
+  let permissionMode = $state("acceptEdits");
+  let starting = $state(false);
+  let startError = $state(null);
+
+  $effect(() => { if (!agent) get("/agent").then((a) => (agent = a)).catch(() => {}); });
+
+  async function runHere() {
+    if (!flow) return;
+    starting = true;
+    startError = null;
+    try {
+      const out = await post("/session/start", {
+        cwd: p.path, prompt: flow.prompt, title: flow.title, permissionMode,
+      });
+      sessionId = out.id;
+      const url = new URL(window.location.href);
+      url.searchParams.set("session", out.id);
+      history.replaceState({}, "", url);
+    } catch (e) { startError = e.message; }
+    starting = false;
+  }
+
+  function closeSession() {
+    sessionId = null;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("session");
+    history.replaceState({}, "", url);
+  }
 
   // Adding repositories to a project that already exists: the same two ways as
   // the wizard, because a project grows after it is created.
@@ -183,20 +216,60 @@ import RemoveProject from "$lib/RemoveProject.svelte";
       <button class:primary={flow?.id === "explore"} onclick={() => startFlow("explore")}>Understand this code</button>
     </div>
 
-    {#if flow}
+    {#if sessionId}
+      <div class="flow">
+        <div class="spread" style="margin-bottom:.5rem">
+          <strong>{flow?.title ?? "Session"}</strong>
+          <button class="ghost" onclick={closeSession}>Close</button>
+        </div>
+        <Session id={sessionId} />
+      </div>
+
+    {:else if flow}
       <div class="flow">
         <div class="spread">
           <strong>{flow.title}</strong>
-          <div class="row">
-            <button onclick={copyPrompt}>{copied ? "Copied" : "Copy prompt"}</button>
-            {#if flow.canLaunch}<button class="primary" onclick={() => post("/flow/launch", { key, flow: flow.id })}>
-              Open in a session
-            </button>{/if}
-            <button class="ghost" onclick={() => (flow = null)}>Close</button>
-          </div>
+          <button class="ghost" onclick={() => (flow = null)}>Close</button>
         </div>
         <p class="tiny muted" style="margin:.4rem 0">{flow.explain}</p>
-        <pre class="out">{flow.prompt}</pre>
+
+        {#if agent?.cli}
+          <!-- The permission mode is the one setting here with real
+               consequences, so it is a choice made before starting rather
+               than a default buried in a config file. -->
+          <div class="modes">
+            {#each agent.modes as m}
+              <label class="mode" class:on={permissionMode === m.id}>
+                <input type="radio" bind:group={permissionMode} value={m.id} />
+                <span><strong>{m.label}</strong><br /><span class="tiny muted">{m.note}</span></span>
+              </label>
+            {/each}
+          </div>
+          <div class="row" style="margin-top:.6rem">
+            <button class="primary" onclick={runHere} disabled={starting}>
+              {starting ? "Starting…" : "Run it here"}
+            </button>
+            <button onclick={copyPrompt}>{copied ? "Copied" : "Copy prompt instead"}</button>
+          </div>
+        {:else}
+          <div class="noagent">
+            <strong class="tiny">No agent CLI on this machine.</strong>
+            <p class="tiny muted" style="margin:.3rem 0 .5rem">
+              With one installed, this runs here and you watch it work — questions, tool calls and
+              all. Without one, the prompt is yours to paste somewhere else.
+            </p>
+            <div class="row">
+              <a class="btn" href="/setup">Install it</a>
+              <button onclick={copyPrompt}>{copied ? "Copied" : "Copy prompt"}</button>
+            </div>
+          </div>
+        {/if}
+
+        {#if startError}<p class="tiny" style="color:var(--bad)">{startError}</p>{/if}
+        <details class="peek">
+          <summary class="tiny faint">What it will be told</summary>
+          <pre class="out">{flow.prompt}</pre>
+        </details>
       </div>
     {/if}
   </div>
@@ -442,6 +515,16 @@ import RemoveProject from "$lib/RemoveProject.svelte";
 
 <style>
   table.hidden { display: none; }
+  .modes { display: flex; flex-direction: column; gap: .4rem; margin-top: .5rem; }
+  .mode { display: flex; gap: .6rem; align-items: flex-start; cursor: pointer;
+          padding: .4rem .5rem; border: 1px solid transparent; border-radius: 6px; }
+  .mode:hover { background: var(--panel-2); }
+  .mode.on { border-color: var(--accent); background: var(--panel-2); }
+  .mode input { margin-top: .25rem; }
+  .noagent { border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--line));
+             border-radius: 8px; padding: .7rem .8rem; margin-top: .5rem; }
+  .peek { margin-top: .6rem; }
+  .peek summary { cursor: pointer; }
   .row-actions { text-align: right; width: 1%; white-space: nowrap; }
   .linky { background: none; border: none; color: var(--ink-faint); font-size: .78rem;
            cursor: pointer; padding: .2rem .35rem; border-radius: 4px; }
