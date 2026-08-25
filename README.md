@@ -34,17 +34,32 @@ command, open work, and what memory holds.*
 
 ## The measured version
 
-| Instead of | You get | Measured |
-|---|---|---|
-| Reading the files around a function | The symbols that bear on the task, their callers, their current source | **89.6% fewer characters** |
-| Pasting a test run into the chat | The exit code and the failing lines, byte for byte | **7,768 chars → 184** |
-| Grepping for what a diff affects | The symbols it touched and everything calling them | **96% smaller** |
-| Searching code by guessing names | Search by intent — right symbol in the top five | **10/12, vs 1/12** |
+Most of what amalgam saves needs no model at all. The two optional downloads
+buy one thing each, and the table says which.
 
-`amalgam stats` keeps the running total, and counts a saving only where a real
-counterfactual exists: a packet knows the files it replaced, a digest knows what
-it consumed. Recall claims nothing, because measuring it would mean running the
-alternative.
+| Instead of | You get | With nothing installed | With the local models |
+|---|---|---|---|
+| Pasting a test run into the chat | The exit code and the failing lines, byte for byte | **22,738 → 105 chars** | same |
+| Grepping for what a diff affects | The symbols it touched and everything calling them | **96% smaller** | same |
+| Reading the files around a function | The symbols that bear on the task, their callers, their current source | **97% smaller** | same size, better choice of symbols |
+| Searching code by intent rather than by name | The right symbol in the top five | **0 of 12** | **5 of 12** |
+| Reading a long log or file to summarise it | A digest, made locally | not available | **91% smaller** |
+
+So: the reductions are structural and hold on a machine with nothing extra
+installed. What the ~220 MB embedding model buys is the ability to find code by
+describing it — without it, search matches names, and a question phrased as
+intent finds nothing. What the ~2.5 GB local model buys is digest, re-ranking,
+session capture and community naming.
+
+Measured on this repository (759 symbols) on 2026-08-25 with `amalgam stats`
+and `bench/code-search.mjs`. A measured claim is a claim about a moment, the
+same as a code graph: an earlier version of this table said 10 of 12, which was
+true when it was written and stopped being true as the repository grew. Re-run
+both and you will get today's numbers rather than these.
+
+`amalgam stats` counts a saving only where a real counterfactual exists: a
+packet knows the files it replaced, a digest knows what it consumed. Recall
+claims nothing, because measuring it would mean running the alternative.
 
 ## Six ideas it is built on
 

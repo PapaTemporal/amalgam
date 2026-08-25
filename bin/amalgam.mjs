@@ -811,9 +811,17 @@ async function cmdGraph(args) {
   const sql = args.includes("--sql");
   // Naming communities needs the local model up; asking for it without one
   // installed would just wait and then fail.
-  const label = args.includes("--label") && modelInstalled();
-  if (args.includes("--label") && !label) {
-    console.log("(--label needs the local model: amalgam install --with-model)\n");
+  // Naming the communities is the default whenever there is a model to do it
+  // with.
+  //
+  // It was opt-in, and the interface opted in while the command line did not —
+  // so a rebuild from a terminal quietly produced a legend reading
+  // "Community 0, Community 1" and a rebuild from the interface did not. Two
+  // ways of doing the same thing should not disagree about what the same thing
+  // means. `--no-label` is there for anyone who wants the numbers back.
+  const label = !args.includes("--no-label") && modelInstalled();
+  if (args.includes("--label") && !modelInstalled()) {
+    console.log("(naming communities needs the local model: amalgam install --with-model)\n");
   }
   const cwd = path.resolve(process.cwd());
 
@@ -1744,9 +1752,10 @@ async function reportMachineGaps() {
 async function cmdDiagram(args) {
   const { opts, words } = parseArgs(args);
   const explicit = words[0];
-  const label = opts.label !== undefined && modelInstalled();
-  if (opts.label !== undefined && !label) {
-    console.log("(--label needs the local model: amalgam install --with-model)\n");
+  // Same default as `graph`, for the same reason.
+  const label = opts["no-label"] === undefined && modelInstalled();
+  if (opts.label !== undefined && !modelInstalled()) {
+    console.log("(naming communities needs the local model: amalgam install --with-model)\n");
   }
 
   const cwd = path.resolve(explicit ?? process.cwd());
