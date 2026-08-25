@@ -59,23 +59,23 @@ async function run(label, search) {
   for (const [q, want] of CASES) ranks.push(rankOf(await search(q), want));
   const at = (n) => ranks.filter((r) => r <= n).length;
   const mrr = ranks.reduce((s, r) => s + (r === Infinity ? 0 : 1 / r), 0) / ranks.length;
-  console.log(`${label.padEnd(26)} hit@1 ${at(1)}/${CASES.length}   hit@3 ${at(3)}/${CASES.length}   hit@5 ${at(5)}/${CASES.length}   MRR ${mrr.toFixed(3)}`);
+  console.log(`${label.padEnd(32)} hit@1 ${at(1)}/${CASES.length}   hit@3 ${at(3)}/${CASES.length}   hit@5 ${at(5)}/${CASES.length}   MRR ${mrr.toFixed(3)}`);
   return ranks;
 }
 
-console.log(`repo ${REPO}\n${CASES.length} questions, each phrased as intent rather than by name\n`);
+console.log(`repo ${REPO}\n${CASES.length} questions, each phrased as intent rather than by name\neach tier is a configuration: no downloads, the embedding model alone, or both\n`);
 
-const nameOnly = await run("names only", async (q) => findSymbols(g, q, 5));
+const nameOnly = await run("names only        (no models)", async (q) => findSymbols(g, q, 5));
 
 let semantic = null, expanded = null, reranked = null;
 if (!withVectors) {
   console.log("semantic                   skipped — no embedding model installed");
 } else {
-  semantic = await run("meaning + names", async (q) => {
+  semantic = await run("meaning + names   (embeddings)", async (q) => {
     const [qv] = (await embed(q, { query: true })) ?? [];
     return searchSymbols(REPO, q, { vec: qv, limit: 5, similarity, fromBlob, expand: false });
   });
-  expanded = await run("+ graph neighbours", async (q) => {
+  expanded = await run("+ graph neighbours (embeddings)", async (q) => {
     const [qv] = (await embed(q, { query: true })) ?? [];
     return searchSymbols(REPO, q, { vec: qv, limit: 5, similarity, fromBlob, expand: true });
   });
@@ -83,7 +83,7 @@ if (!withVectors) {
     console.log("+ local rerank             skipped — no local model installed");
   } else {
     const t0 = Date.now();
-    reranked = await run("+ local rerank", async (q) => {
+    reranked = await run("+ local rerank    (both models)", async (q) => {
       const [qv] = (await embed(q, { query: true })) ?? [];
       const wide = searchSymbols(REPO, q, { vec: qv, limit: 20, similarity, fromBlob, expand: true });
       return (await rerankSymbols(q, wide)) ?? wide;

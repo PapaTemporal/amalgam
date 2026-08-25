@@ -34,28 +34,96 @@ command, open work, and what memory holds.*
 
 ## The measured version
 
-Most of what amalgam saves needs no model at all. The two optional downloads
-buy one thing each, and the table says which.
+There are two optional downloads and they buy different things, so here is
+what each one is actually worth. Everything structural works with neither.
 
-| Instead of | You get | With nothing installed | With the local models |
-|---|---|---|---|
-| Pasting a test run into the chat | The exit code and the failing lines, byte for byte | **22,738 → 105 chars** | same |
-| Grepping for what a diff affects | The symbols it touched and everything calling them | **96% smaller** | same |
-| Reading the files around a function | The symbols that bear on the task, their callers, their current source | **97% smaller** | same size, better choice of symbols |
-| Searching code by intent rather than by name | The right symbol in the top five | **0 of 12** | **5 of 12** |
-| Reading a long log or file to summarise it | A digest, made locally | not available | **91% smaller** |
+| Instead of | You get | Nothing installed | Embeddings (~220 MB) | Both (~2.7 GB) |
+|---|---|---|---|---|
+| Pasting a test run into the chat | The exit code and the failing lines, byte for byte | **22,738 → 105 chars** | same | same |
+| Grepping for what a diff affects | The symbols it touched and everything calling them | **96% smaller** | same | same |
+| Reading the files around a function | The symbols that bear on the task, their callers, their current source | **97% smaller** | same size | same size |
+| Searching code by intent rather than by name | The right symbol in the top five | **0 of 12** | **5 of 12** | **5 of 12** |
+| …and in the top three | Less to read before you find it | 0 of 12 | 3 of 12 | **5 of 12** |
+| Recalling what you decided months ago | The facts that bear on it | by keyword | **by meaning** | by meaning |
+| Reading a long log to summarise it | A digest, made locally | — | — | **91% smaller** |
+| Opening a graph of an unfamiliar codebase | Neighbourhoods with names, not numbers | numbered | numbered | **named** |
+| Ending a session | Durable facts proposed for review | — | — | **automatic** |
 
-So: the reductions are structural and hold on a machine with nothing extra
-installed. What the ~220 MB embedding model buys is the ability to find code by
-describing it — without it, search matches names, and a question phrased as
-intent finds nothing. What the ~2.5 GB local model buys is digest, re-ranking,
-session capture and community naming.
+**Nothing installed** is not a crippled mode. The three reductions at the top
+are structural — they come from sending symbols instead of files, and an exit
+code instead of a log — and they do not improve by a single character when you
+add a model. On a machine with no downloads at all, amalgam still replaces file
+reads with evidence packets and test logs with their failures.
 
-Measured on this repository (759 symbols) on 2026-08-25 with `amalgam stats`
-and `bench/code-search.mjs`. A measured claim is a claim about a moment, the
-same as a code graph: an earlier version of this table said 10 of 12, which was
-true when it was written and stopped being true as the repository grew. Re-run
-both and you will get today's numbers rather than these.
+**The embedding model is the one to install.** It is the difference between
+searching by name and searching by description: without it a question phrased
+as intent finds nothing at all, and with it the right symbol is in the top five
+of twelve tries. It does the same for memory, which falls back to keyword
+search without it.
+
+**The local model is a convenience, not a retrieval upgrade.** It moves answers
+up the list rather than finding more of them — top-five is unchanged at five of
+twelve, top-three goes from three to five. What it genuinely adds is elsewhere:
+digest, naming the neighbourhoods in a graph, and proposing facts at the end of
+a session. If disk is tight, skip this one.
+
+### What it was measured against
+
+Two codebases, because a saving measured on a small one proves very little.
+
+| | | |
+|---|---|---|
+| **amalgam** | 759 symbols, 1,702 edges, JavaScript | retrieval accuracy, check output, blast radius |
+| **MuseScore** | 95,826 symbols, 203,910 edges, C++ | packet size at scale |
+
+Retrieval accuracy is measured on amalgam only, and that is a limitation worth
+stating rather than glossing: the twelve questions have a known right answer
+because the codebase is one I can vouch for. The same benchmark against
+MuseScore would need twelve questions whose correct answer I could defend, and
+I cannot.
+
+### One question, in full
+
+The task is `where does the score get written to a file`, asked of MuseScore.
+Answering it by reading the files the relevant symbols live in is **two files,
+380,924 characters**. What gets sent instead is **2,288** — a 99.4% reduction,
+and the top of it looks like this:
+
+```
+--- writeMxlArchive  src/importexport/musicxml/internal/musicxml/export/exportxml.cpp:6829
+--- saveMxl  src/importexport/musicxml/internal/musicxml/export/exportxml.cpp:6852
+bool saveMxl(Score* score, IODevice* device)
+{
+    muse::ZipWriter zip(device);
+
+    //anonymized filename since we don't know the actual one here
+    String fn = u"score.xml";
+    writeMxlArchive(score, zip, fn);
+    zip.close();
+
+    return true;
+}
+--- .writeScore  src/engraving/api/v1/engravingapiv1.h:290
+--- EngravingApiV1  src/engraving/api/v1/engravingapiv1.h:42
+```
+
+Five symbols, each with the file and line it is at now and the source as it
+currently reads — not as the index remembers it. A second question, *how is a
+chord laid out on the staff*, replaces four files and 504,596 characters with
+3,883: 99.2%.
+
+Neither number needs a model. The embedding model is what turned an
+English question into those five symbols; without it the same question matches
+on names and finds nothing, which is the zero in the table above.
+
+### On these numbers
+
+Measured on 2026-08-25 with `amalgam stats` and `bench/code-search.mjs`, which
+prints all three configurations in one run so the table can be checked against
+it. A measured claim is a claim about a moment, exactly like a code graph: an
+earlier version of this table said ten of twelve, which was true when written
+and stopped being true as the repository grew by a hundred and eighty symbols.
+Re-run both and you will get today's numbers rather than these.
 
 `amalgam stats` counts a saving only where a real counterfactual exists: a
 packet knows the files it replaced, a digest knows what it consumed. Recall
