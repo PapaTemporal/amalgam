@@ -176,7 +176,7 @@
     {:else if mode === "tree"}
       {#if tree}
         <div class="tree">
-          <CodeTree node={tree} onpick={(n) => select(n.id)} {selected} />
+          <CodeTree node={tree} projectKey={key} onpick={(n) => select(n.id)} {selected} />
         </div>
       {:else}<p class="tiny faint">reading the graph…</p>{/if}
 
@@ -393,7 +393,6 @@
   .tabs { display: flex; gap: .3rem; margin-bottom: .7rem; }
   .tabs button { font-size: .8rem; padding: .3rem .6rem; }
   .tabs button.on { background: var(--panel-2); color: var(--ink); border-color: var(--ink-faint); }
-  .sub-tabs { margin-top: .9rem; }
 
   ul.hits, ol.steps, ul.clusters { list-style: none; margin: .4rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .15rem; }
   ul.hits button, ol.steps button { display: flex; align-items: baseline; gap: .4rem; width: 100%;

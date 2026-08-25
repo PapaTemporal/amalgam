@@ -72,7 +72,7 @@ import RemoveProject from "$lib/RemoveProject.svelte";
   // Running the work here, rather than handing over a prompt to run elsewhere.
   let agent = $state(null);            // what this machine can drive
   let sessionId = $state(page.url.searchParams.get("session"));
-  let permissionMode = $state("acceptEdits");
+  let permissionMode = $state("read");
   let starting = $state(false);
   let startError = $state(null);
 

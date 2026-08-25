@@ -173,11 +173,34 @@ check("a symbol that is gone is reported gone, not quoted",
   gone.source?.missing ?? "(still quoted!)");
 
 // --- the shapes a page needs ------------------------------------------------
+// The tree arrives a branch at a time. A project with a hundred thousand
+// symbols is eleven megabytes of tree if sent whole, which is not something
+// anybody browses — so the contract is one level, with the totals carried on
+// every row so a folded branch still says how much it is hiding.
 const t = tree(TMP);
-check("the tree is service, then file, then symbol",
-  t.children.length === 2 && t.symbols === 4
-  && t.children.every((c) => c.children.length && c.symbols > 0),
+check("the top level is the services, with their totals",
+  t.children.length === 2 && t.symbols === 4 && t.children.every((c) => c.symbols > 0),
   t.children.map((c) => `${c.name}:${c.symbols}`).join(" "));
+
+check("branches below are counted but not sent",
+  t.children.every((c) => c.children.length === 0 && c.childCount > 0 && c.hasMore),
+  t.children.map((c) => `${c.name} holds ${c.childCount}, unsent`).join(" | "));
+
+const branch = tree(TMP, { under: t.children[0].path });
+check("and a named branch returns its own children",
+  !!branch && branch.name === t.children[0].name && branch.children.length > 0,
+  branch ? `${branch.name} -> ${branch.children.map((c) => c.name).join(", ")}` : "(not found)");
+
+const deeper = tree(TMP, { under: t.children[0].path, depth: 3 });
+const symbols = [];
+(function walk(n) { if (n.kind === "symbol") symbols.push(n.name); (n.children ?? []).forEach(walk); })(deeper);
+check("asking deeper reaches the symbols themselves",
+  symbols.length > 0 && symbols.every((n) => typeof n === "string"),
+  symbols.join(", ") || "(none)");
+
+check("a branch that does not exist is not silently the whole tree",
+  tree(TMP, { under: "no/such/place" }) === null,
+  "returns null rather than falling back to the root");
 
 const nb = await neighbourhood(TMP, "web::api_placeorder", { depth: 1 });
 check("a neighbourhood carries the root and its edges",
