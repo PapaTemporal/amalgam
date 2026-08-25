@@ -20,11 +20,17 @@
   let embeddings = $state(true);
   let model = $state(false);
 
+  // Both reads land before anything renders. Showing the page as soon as one
+  // of them arrives is why the checkboxes used to settle a second apart —
+  // semantic recall ticking itself, then the local model following, which
+  // reads as the page changing its mind rather than as data arriving.
+  let ready = $state(false);
   async function load() {
     const [s] = await Promise.all([get("/state"), refreshInstall()]);
     state = s;
     model = s.model;
     embeddings = s.embeddings || embeddings;
+    ready = true;
   }
   $effect(() => { if (!state) load(); });
 
@@ -104,6 +110,10 @@
   </div>
 </header>
 
+{#if !ready}
+  <div class="card"><p class="tiny faint" style="margin:0">reading what is installed…</p></div>
+{:else}
+
 {#if info && !info.installed}
   <div class="card edge-warn" style="margin-bottom:1.25rem">
     <strong>amalgam is not deployed on this machine.</strong>
@@ -126,7 +136,7 @@
 {#if job}
   <div class="card {job.state === 'failed' ? 'edge-bad' : ''}" style="margin-bottom:1.25rem">
     <h2>{job.title ?? jobTitle}</h2>
-    <Stepper steps={job.steps} state={job.state} error={job.error} />
+    <Stepper steps={job.steps} status={job.state} error={job.error} />
     {#if done}
       <div class="row" style="margin-top:.5rem">
         <a class="btn primary" href="/">Back to projects</a>
@@ -156,13 +166,21 @@
   <div class="card stack">
     <div>
       <h2>{info?.installed ? "Reinstall" : "Install and wire"}</h2>
+      {#if info?.installed}
+        <p class="when"><strong>Use this when</strong> something is behaving as though it is not
+          installed — a missing MCP tool, a skill that never loads, an <code>amalgam</code> command
+          the shell cannot find — or when you want to add one of the optional downloads below.
+          Not for picking up new code: that is Update.</p>
+      {:else}
+        <p class="when"><strong>Start here.</strong> Nothing else works until this has run once.</p>
+      {/if}
       <p class="tiny muted">
         Copies amalgam into your home directory, registers it for every project on this machine,
         and puts <code>amalgam</code> on your PATH. Nothing is installed system-wide and nothing
         runs as a service.
         {#if info?.installed}
           Running it again overwrites the deployed copy — safe, and the way to repair one that
-          has drifted. Your memory database and projects are untouched.
+          has drifted. Your memory database and your projects are untouched.
         {/if}
       </p>
     </div>
@@ -201,6 +219,16 @@
   <div class="card stack">
     <div>
       <h2>Update</h2>
+      <p class="when">
+        <strong>Use this when</strong>
+        {#if info?.stale}
+          the chip says an update is ready — as it does now. Your clone has moved past what is
+          deployed, and until this runs, the agent is still using the old code.
+        {:else}
+          you want the latest release, or after pulling this repository by hand. It is the only
+          thing that makes new code actually take effect.
+        {/if}
+      </p>
       <p class="tiny muted">
         Pulls the latest source, re-deploys it, and refreshes the wiring in every project that
         was wired. The built pages are part of the repository, so this updates the UI as well —
@@ -241,17 +269,7 @@
   </div>
 </div>
 
-<div class="card" style="margin-top:1.25rem">
-  <h2>Projects</h2>
-  <p class="tiny muted">
-    Projects are set up on their own, because that means choosing where one lives and putting
-    repositories into it.
-  </p>
-  <div class="row">
-    <a class="btn" href="/setup/project?new">Start a new project</a>
-    <a class="btn" href="/setup/project">Add an existing one</a>
-  </div>
-</div>
+{/if}
 
 <style>
   .opt { display: flex; gap: .7rem; align-items: flex-start; cursor: pointer; }
@@ -264,5 +282,8 @@
   .edge-warn { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
   .edge-bad { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
   .warn-text { color: var(--warn); }
+  .when { font-size: .82rem; color: var(--ink-dim); margin: 0 0 .5rem;
+          border-left: 2px solid var(--accent); padding-left: .6rem; }
+  .when strong { color: var(--ink); }
   @media (max-width: 860px) { .two { grid-template-columns: 1fr; } }
 </style>

@@ -2,6 +2,7 @@
   import { get, post, watchJob } from "$lib/api.js";
   import Stepper from "$lib/Stepper.svelte";
 import RemoveProject from "$lib/RemoveProject.svelte";
+  import Modal from "$lib/Modal.svelte";
   import { page } from "$app/state";
 
   const key = $derived(page.params.key);
@@ -91,6 +92,23 @@ import RemoveProject from "$lib/RemoveProject.svelte";
     });
   }
 
+  // Taking a repository out of a project, without touching the repository.
+  let detaching = $state(null);
+  let detachDelete = $state(false);
+
+  async function detach() {
+    const svc = detaching;
+    detaching = null;
+    jobLabel = `Removing ${svc.name}`;
+    job = { state: "running", steps: [] };
+    const { jobId } = await post("/service/remove", { project: p.path, name: svc.name, deleteFiles: detachDelete });
+    detachDelete = false;
+    watchJob(jobId, async (u) => {
+      job = u;
+      if (u.state === "done") { data = null; await load(); }
+    });
+  }
+
   async function refreshEverything() {
     jobLabel = "Bringing the project up to date";
     job = { state: "running", steps: [] };
@@ -153,13 +171,6 @@ import RemoveProject from "$lib/RemoveProject.svelte";
     </div>
   </header>
 
-  {#if removing}
-    <div style="margin-bottom:1.25rem">
-      <RemoveProject projectKey={key} name={p.name}
-        ondone={() => (location.href = "/")} oncancel={() => (removing = false)} />
-    </div>
-  {/if}
-
   <!-- What the agent can be asked to do. The three shapes of work people
        actually start: something new, something already specified, or a look
        at what is already there. -->
@@ -204,7 +215,7 @@ import RemoveProject from "$lib/RemoveProject.svelte";
         <span class="tiny faint">{p.graphBlocked ?? "code search and impact need this"}</span>
       {/if}
       <div class="row" style="margin-top:.6rem">
-        <button disabled={!!p.graphBlocked} onclick={() => run("graph", "Building the code graph")}>
+        <button disabled={!!p.graphBlocked} onclick={refreshEverything}>
           {p.graph ? "Rebuild" : "Build"}
         </button>
         <a class="btn" href={`/projects/${key}/map`}>Map</a>
@@ -260,7 +271,7 @@ import RemoveProject from "$lib/RemoveProject.svelte";
   {#if job}
     <div class="card {job.state === 'failed' ? 'bad-edge' : ''}" style="margin-bottom:1.25rem">
       <h2>{job.title ?? jobLabel}</h2>
-      <Stepper steps={job.steps} state={job.state} error={job.error} />
+      <Stepper steps={job.steps} status={job.state} error={job.error} />
     </div>
   {/if}
 
@@ -291,13 +302,16 @@ import RemoveProject from "$lib/RemoveProject.svelte";
                 {#if svc.checks.length}<span class="pill">{svc.checks.join(", ")}</span>
                 {:else}<span class="pill warn">no checks</span>{/if}
               </td>
+              <td class="row-actions">
+                <button class="linky" title={`Remove ${svc.name} from this project`}
+                        onclick={() => (detaching = svc)}>Remove…</button>
+              </td>
             </tr>
           {/each}
         </tbody>
       </table>
       <div class="row" style="margin-top:.75rem">
         <button onclick={() => (addKind = addKind ? null : "clone")}>Add a repository</button>
-        <button class="ghost" onclick={refreshEverything}>Rebuild graph and links</button>
       </div>
 
       {#if addKind}
@@ -393,8 +407,48 @@ import RemoveProject from "$lib/RemoveProject.svelte";
   <p class="faint">reading project…</p>
 {/if}
 
+<Modal open={!!detaching} title={detaching ? `Remove “${detaching.name}” from ${p?.name ?? "this project"}?` : ""}
+       onclose={() => { detaching = null; detachDelete = false; }}>
+  {#if detaching}
+    <p class="tiny muted">
+      It stops being a service of this project: its code graph and its contracts come out of the
+      project's totals. By default the folder stays exactly where it is.
+    </p>
+    <label class="opt">
+      <input type="checkbox" bind:checked={detachDelete} />
+      <span>
+        <strong>Also delete the folder from disk</strong>
+        <br /><span class="tiny muted">
+          <span class="mono">{detaching.path}</span> and everything in it, including uncommitted work.
+          This cannot be undone.
+        </span>
+      </span>
+    </label>
+    <div class="row" style="justify-content:flex-end;margin-top:1rem">
+      <button class="ghost" onclick={() => { detaching = null; detachDelete = false; }}>Cancel</button>
+      <button class="danger primary" onclick={detach}>
+        {detachDelete ? "Remove and delete the folder" : "Remove from this project"}
+      </button>
+    </div>
+  {/if}
+</Modal>
+
+<Modal open={removing} title={`Remove “${p?.name ?? ""}”?`} onclose={() => (removing = false)}>
+  {#if removing}
+    <RemoveProject projectKey={key} name={p.name}
+      ondone={() => (location.href = "/")} oncancel={() => (removing = false)} />
+  {/if}
+</Modal>
+
 <style>
   table.hidden { display: none; }
+  .row-actions { text-align: right; width: 1%; white-space: nowrap; }
+  .linky { background: none; border: none; color: var(--ink-faint); font-size: .78rem;
+           cursor: pointer; padding: .2rem .35rem; border-radius: 4px; }
+  .linky:hover { color: var(--bad); background: var(--panel-2); }
+  .opt { display: flex; gap: .7rem; align-items: flex-start; cursor: pointer; margin-top: .9rem; }
+  .opt input { margin-top: .3rem; }
+  button.danger.primary { background: var(--bad); border-color: var(--bad); color: #1a0808; }
   .addrepo { display: flex; flex-direction: column; gap: .5rem; margin-top: .75rem;
              border-top: 1px solid var(--line); padding-top: .75rem; }
   .flow { margin-top: .9rem; border-top: 1px solid var(--line); padding-top: .9rem; }

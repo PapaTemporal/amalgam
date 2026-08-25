@@ -37,9 +37,7 @@
   const anything = $derived(graph || bmad || wiring || tasks);
 </script>
 
-<div class="card remove">
-  <h2>Remove “{name}”?</h2>
-
+<div class="remove">
   {#if error}
     <p class="tiny" style="color:var(--bad)">{error}</p>
   {:else if !detail}
@@ -102,17 +100,19 @@
       </label>
     </div>
 
-    <div class="row">
+    <div class="row actions">
+      <button class="ghost" onclick={oncancel} disabled={busy}>Cancel</button>
       <button class="danger primary" onclick={confirm} disabled={busy}>
         {busy ? "Removing…" : anything ? "Remove and delete the ticked items" : "Remove from list only"}
       </button>
-      <button class="ghost" onclick={oncancel} disabled={busy}>Cancel</button>
     </div>
   {/if}
 </div>
 
 <style>
-  .remove { border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }
+  /* Cancel first, then the destructive action on the right, where the eye
+     lands last and the hand has to travel. */
+  .actions { justify-content: flex-end; margin-top: .25rem; }
   .opts { display: flex; flex-direction: column; gap: .7rem; margin: 1rem 0; }
   .opt { display: flex; gap: .7rem; align-items: flex-start; cursor: pointer; }
   .opt input { margin-top: .3rem; }

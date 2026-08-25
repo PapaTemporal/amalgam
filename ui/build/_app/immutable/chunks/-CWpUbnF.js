@@ -1,1 +1,0 @@
-import{I as t}from"./D_ccskRr.js";import{g as e}from"./LEoDrNAa.js";const l=t({data:null,loaded:!1,error:null});let a=null;async function s(){return a??(a=e("/install").then(r=>{l.data=r,l.error=null}).catch(r=>{l.error=r.message}).finally(()=>{l.loaded=!0,a=null})),a}export{l as i,s as r};

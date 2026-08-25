@@ -2,6 +2,7 @@
   import { get, post, relative } from "$lib/api.js";
   import Picker from "$lib/Picker.svelte";
   import RemoveProject from "$lib/RemoveProject.svelte";
+  import Modal from "$lib/Modal.svelte";
 
   let state = $state(null);
   let error = $state(null);
@@ -81,14 +82,6 @@
       </div>
     </div>
 
-    {#if removing}
-      <div style="margin-bottom:1rem">
-        <RemoveProject projectKey={removing.key} name={removing.name}
-          ondone={() => { removing = null; state = null; load(); }}
-          oncancel={() => (removing = null)} />
-      </div>
-    {/if}
-
     {#if picking}
       <div style="margin-bottom:1rem"><Picker onpick={add} /></div>
     {/if}
@@ -96,14 +89,23 @@
     <div class="grid">
       {#each state.projects as p}
         <a class="card link" href={`/projects/${p.key}`}>
+          <button class="remove" title={`Remove ${p.name}…`} aria-label={`Remove ${p.name}`}
+                  onclick={(e) => remove(e, p)}>
+            <!-- A bin, not a cross: a cross beside a title reads as "close
+                 this", and this deletes nothing until you say so but is still
+                 not a dismissal. -->
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+              <path d="M6 2h4M2.5 4h11M4.5 4l.6 9a1 1 0 0 0 1 1h3.8a1 1 0 0 0 1-1l.6-9M6.6 6.5v5M9.4 6.5v5"
+                    fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+            </svg>
+          </button>
           <div class="title">
             <strong>{p.name}</strong>
-            <button class="ghost danger remove" title="Remove from list" onclick={(e) => remove(e, p)}>×</button>
             {#if !p.exists}<span class="pill bad">missing</span>
             {:else if p.dirtyFiles > 0}<span class="pill warn">{p.dirtyFiles} uncommitted</span>
             {:else}<span class="pill good">clean</span>{/if}
           </div>
-          <p class="tiny faint mono" style="margin:.35rem 0 .6rem">{p.path}</p>
+          <p class="path tiny faint mono" title={p.path}>{p.path}</p>
           <div class="row tiny muted">
             {#if p.branch}<span class="pill">{p.branch}</span>{/if}
             {#if p.hasBmad}<span class="pill">bmad</span>{/if}
@@ -145,9 +147,36 @@
   </div>
 {/if}
 
+<Modal open={!!removing} title={removing ? `Remove “${removing.name}”?` : ""} onclose={() => (removing = null)}>
+  {#if removing}
+    <RemoveProject projectKey={removing.key} name={removing.name}
+      ondone={() => { removing = null; state = null; load(); }}
+      oncancel={() => (removing = null)} />
+  {/if}
+</Modal>
+
 <style>
-  /* Present but quiet until the card is hovered: removing a project is a
-     deliberate act, not something to invite with a prominent button. */
-  .remove { border: none; padding: 0 .3rem; line-height: 1; font-size: 1.15rem; opacity: .3; }
-  .card:hover .remove { opacity: 1; }
+  /* Top right, where a control that acts on the whole card belongs — not
+     inline beside the title, where it was competing with the name it removes.
+     Quiet until the card is hovered: removing a project is a deliberate act,
+     not something to invite. */
+  .card.link { position: relative; }
+  .remove {
+    position: absolute; top: .55rem; right: .55rem;
+    display: grid; place-items: center; width: 1.75rem; height: 1.75rem;
+    background: none; border: 1px solid transparent; border-radius: 6px;
+    color: var(--ink-faint); cursor: pointer; opacity: 0; transition: opacity .12s;
+  }
+  .card:hover .remove, .remove:focus-visible { opacity: 1; }
+  .remove:hover { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
+
+  /* A path is long and a card is not: it stays on one line and keeps the end,
+     which is the half that identifies the folder. */
+  .path {
+    margin: .35rem 0 .6rem;
+    direction: rtl; text-align: left;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  /* Room for the button, so a long name never runs under it. */
+  .title { padding-right: 2rem; }
 </style>

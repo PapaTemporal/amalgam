@@ -716,6 +716,12 @@ async function indexOneGraph(dir) {
       ? `${res.embedded} embedded, ${res.reused} vectors reused`
       : "no embeddings installed — name search only";
     console.log(`  indexed -> ${res.symbols} symbols, ${res.edges} edges (${vec}${res.removed ? `, ${res.removed} gone` : ""})`);
+    // An index that searches by name is a working index; say what is reduced
+    // rather than letting it look like a clean run.
+    if (res.embedError) {
+      console.log(`  note: ${res.missingVectors} symbol(s) have no vector — ${res.embedError}.`);
+      console.log(`        Search here falls back to names. Re-run once the model is available.`);
+    }
     return true;
   } catch (e) {
     console.log(`  NOT INDEXED: ${e.message}`);
@@ -1622,7 +1628,8 @@ async function cmdUi(args) {
   const { createServer } = await import("../lib/uiserver.mjs");
   const { buildApi } = await import("../lib/uiapi.mjs");
 
-  const server = createServer({ api: buildApi() });
+  const api = buildApi();
+  const server = createServer({ api });
   server.on("error", (e) => {
     if (e.code === "EADDRINUSE") {
       console.error(`Port ${port} is busy — something else is listening. Try: amalgam ui --port ${port + 1}`);
@@ -1634,6 +1641,12 @@ async function cmdUi(args) {
     const url = `http://127.0.0.1:${port}`;
     console.log(`amalgam ui -> ${url}`);
     console.log(`(local only; nothing is exposed to the network. Ctrl+C to stop.)`);
+    // Warm the expensive parts before anyone clicks. The first read of this
+    // costs seconds — process lookups on PATH, git's first run against each
+    // repository, opening the database — and paying it while the browser is
+    // still starting is free. Failures here are irrelevant: it is the same
+    // work the first request would have done anyway.
+    api["/api/state"]?.({ url: new URL(`${url}/api/state`) })?.catch?.(() => {});
     if (opts.open !== false && !opts["no-open"]) {
       const cmd = process.platform === "win32" ? `start "" "${url}"`
         : process.platform === "darwin" ? `open "${url}"` : `xdg-open "${url}"`;

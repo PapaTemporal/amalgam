@@ -188,7 +188,7 @@
     {/if}
 
     {#if job}
-      <Stepper steps={job.steps} state={job.state} error={job.error} />
+      <Stepper steps={job.steps} status={job.state} error={job.error} />
     {:else}
       <div class="add">
         <div class="stack">
@@ -239,7 +239,7 @@
 {#if step === "running" || step === "done"}
   <div class="card">
     <h2>{job?.title ?? "Setting up"}</h2>
-    <Stepper steps={job?.steps ?? []} state={job?.state ?? "running"} error={job?.error} />
+    <Stepper steps={job?.steps ?? []} status={job?.state ?? "running"} error={job?.error} />
     {#if step === "done"}
       <div class="row" style="margin-top:.5rem">
         <a class="btn primary" href="/">Open the project</a>
