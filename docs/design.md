@@ -461,6 +461,45 @@ hundred files directly" is not advice anybody can act on, so the advice becomes
 Nothing is said when nothing changed. A notice printed every session stops
 being read by the third one.
 
+### A detached child has to leave evidence
+
+The refresh runs detached from the session-end hook with its output discarded,
+because nobody wants a rebuild printing into a terminal they have closed. That
+silence had a cost: the hook spawned the CLI beside itself under
+`AMALGAM_HOME`, the install payload copied `mcp`, `skills`, `lib` and `hooks`
+but **not** `bin`, and the child died instantly on `MODULE_NOT_FOUND` with
+nowhere to say so.
+
+The feature was broken on every machine from the day it shipped, and every
+surface looked correct — because each one reported what the policy *intended*.
+`amalgam refresh --plan` would say `WOULD  amalgam-pkg  12s last time`, which
+was true, and told you nothing about whether it had ever happened.
+
+So each run now writes down that it ran: when, what it rebuilt, and what went
+wrong if anything did. One line, overwritten each time. It exists to
+distinguish **"it has never run"** from **"it ran and found nothing to do"** —
+states that look identical from outside and mean completely different things.
+`refresh --plan` and the Setup card both lead with it now.
+
+The test that was missing is the one that would have caught it: read the paths
+the hooks reach for, and assert the install actually put them there. It fails
+with `missing: bin` against the original code.
+
+### Timings are per machine, and that has a cold start
+
+A build timing is recorded where the build happened, because machines differ
+and another machine's number is not yours. The consequence is that a repository
+set up somewhere else arrives on a new machine with a graph and no idea what
+rebuilding it costs — so the policy refuses to start it, correctly, and
+automatic refresh does nothing at all until somebody builds each repository
+once by hand.
+
+That is defensible but it was invisible, which is not. It is now one of the
+things **[this machine still needs](ui.md)** reports, alongside a missing agent
+CLI and an unfetched model: *"never built on this machine, so it will never
+refresh itself"*. One build clears it — that is how the machine learns the
+cost — and from then on the repository keeps itself current.
+
 ### Why the graph swap is one transaction
 
 Refreshing can overlap with a session that is working, which turns a

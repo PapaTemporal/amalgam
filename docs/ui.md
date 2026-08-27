@@ -142,8 +142,11 @@ that benefits is the next one. Only the index is rebuilt — drawing and
 clustering are what make a rebuild slow, and neither changes what an agent can
 find.
 
-The card names every repository, what its last build actually cost, and what
-would happen to it when a session ends. Three rules keep it from eating the
+The card leads with whether it has **actually run** — and says so plainly when
+it has not, because "never ran" and "ran and found nothing to do" look the same
+from outside and mean opposite things. Below that it names every repository,
+what its last build actually cost, and what would happen to it when a session
+ends. Three rules keep it from eating the
 machine:
 
 - **A budget.** More than 90 seconds and it is not something to start behind

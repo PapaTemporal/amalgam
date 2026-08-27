@@ -144,6 +144,79 @@ check("and off means off", autoRefreshEnabled() === false,
   "a machine should be able to do nothing unbidden");
 delete process.env.AMALGAM_AUTO_REFRESH;
 
+// --- what the hook runs has to exist where it looks for it ------------------
+// This is the check that was missing, and its absence cost the whole feature.
+// The session-end hook spawns the CLI beside itself under AMALGAM_HOME, the
+// install payload copied everything EXCEPT bin, and the child died on
+// MODULE_NOT_FOUND — detached, stdio ignored, error swallowed. Every surface
+// reported what the policy intended; nothing reported what happened.
+{
+  const home = path.join(TMP, "deployed");
+  const pkg = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
+
+  const install = spawnSync(process.execPath, [path.join(pkg, "bin", "amalgam.mjs"), "install"], {
+    encoding: "utf8", windowsHide: true,
+    env: { ...process.env, AMALGAM_HOME: home },
+  });
+  check("a bare install succeeds", install.status === 0,
+    (install.stderr || install.stdout || "").trim().split("\n").slice(-1)[0]);
+
+  // Read the spawn targets out of the hooks rather than hard-coding them, so a
+  // hook that starts running something new is covered without editing this.
+  const hookDir = path.join(home, "hooks");
+  const referenced = new Set();
+  for (const f of fs.existsSync(hookDir) ? fs.readdirSync(hookDir) : []) {
+    if (!f.endsWith(".mjs")) continue;
+    const src = fs.readFileSync(path.join(hookDir, f), "utf8");
+    for (const m of src.matchAll(/path\.join\(HERE,\s*"\.\.",\s*"([^"]+)"/g)) referenced.add(m[1]);
+  }
+
+  check("the hooks reference something outside their own directory",
+    referenced.size > 0, [...referenced].join(", ") || "(nothing — this check would pass vacuously)");
+
+  const missing = [...referenced].filter((d) => !fs.existsSync(path.join(home, d)));
+  check("and everything they reach for was deployed",
+    missing.length === 0, missing.length ? `missing: ${missing.join(", ")}` : [...referenced].join(", "));
+
+  // Not just present — runnable. A copied file that cannot resolve its own
+  // imports fails exactly as invisibly as one that is not there.
+  const cli = path.join(home, "bin", "amalgam.mjs");
+  if (fs.existsSync(cli)) {
+    const ran = spawnSync(process.execPath, [cli, "refresh", "--plan"], {
+      encoding: "utf8", windowsHide: true,
+      env: { ...process.env, AMALGAM_HOME: home },
+    });
+    check("the deployed CLI actually runs from there",
+      ran.status === 0 && !/MODULE_NOT_FOUND/.test(ran.stderr ?? ""),
+      (ran.stderr || "").split("\n")[0] || "exit 0");
+  }
+}
+
+// --- a run that produced nothing is not the same as no run ------------------
+{
+  const home2 = path.join(TMP, "evidence");
+  fs.mkdirSync(home2, { recursive: true });
+  const saved = process.env.AMALGAM_HOME;
+  process.env.AMALGAM_HOME = home2;
+
+  // Re-imported so it reads the redirected home.
+  const fresh = await import(`../lib/refresh.mjs?evidence=${Date.now()}`);
+  check("before anything runs, there is no record of a run",
+    fresh.lastRun() === null,
+    "'never ran' and 'ran and found nothing' look identical from outside");
+
+  fresh.recordRun({ considered: 0, rebuilt: [] });
+  check("a run that found nothing still says it happened",
+    fresh.lastRun()?.at && fresh.lastRun().rebuilt.length === 0,
+    JSON.stringify(fresh.lastRun()));
+
+  fresh.recordRun({ considered: 1, rebuilt: [], error: "llama-server would not start" });
+  check("and a run that failed says what went wrong",
+    /would not start/.test(fresh.lastRun()?.error ?? ""), fresh.lastRun()?.error);
+
+  process.env.AMALGAM_HOME = saved;
+}
+
 console.log(`\n${failed ? `${failed} check(s) failed` : "all checks passed"}`);
 try { fs.rmSync(TMP, { recursive: true, force: true }); } catch {}
 process.exitCode = failed ? 1 : 0;

@@ -27,7 +27,7 @@ import { open as openDb } from "../lib/db.mjs";
 import { verifyFact } from "../lib/verify.mjs";
 import { graphStaleness as freshnessOf } from "../lib/freshness.mjs";
 import { recordBuild, dueForRefresh, refreshPlan, autoRefreshEnabled,
-         BUDGET_MS, COOLDOWN_MS } from "../lib/refresh.mjs";
+         recordRun, lastRun, BUDGET_MS, COOLDOWN_MS } from "../lib/refresh.mjs";
 import { check as runCheck, render as renderCheck } from "../lib/checks.mjs";
 import { runGate, renderGate, detectChecks } from "../lib/gates.mjs";
 import { contracts as findContracts, saveContracts, render as renderContracts } from "../lib/contracts.mjs";
@@ -290,7 +290,11 @@ async function cmdInstall(args) {
 
   fs.mkdirSync(HOME, { recursive: true });
   // 1) code payload → HOME (so project wiring never depends on where the repo clone lives)
-  for (const dir of ["mcp", "skills", "lib", "hooks"]) copyDir(path.join(PKG, dir), path.join(HOME, dir));
+  // `bin` belongs here as much as the rest of it: the hooks under HOME spawn
+  // the CLI beside them, and without it a detached child dies on MODULE_NOT_FOUND
+  // with its output discarded — which is exactly how the automatic refresh
+  // managed to be broken on every machine without anyone noticing.
+  for (const dir of ["mcp", "skills", "lib", "hooks", "bin"]) copyDir(path.join(PKG, dir), path.join(HOME, dir));
   // The compiled interface travels with the install, or `amalgam ui` run from
   // anywhere but a source checkout serves nothing. Only the build output: the
   // Svelte sources and their toolchain are a contributor's concern.
@@ -1756,7 +1760,17 @@ async function cmdRefresh(args) {
     if (!plan.length) return console.log("No projects registered.");
     console.log(`budget ${Math.round(BUDGET_MS / 1000)}s per repository, then ` +
                 `${Math.round(COOLDOWN_MS / 60000)} minutes before the same one again` +
-                `${autoRefreshEnabled() ? "" : "   (automatic refresh is off)"}\n`);
+                `${autoRefreshEnabled() ? "" : "   (automatic refresh is off)"}`);
+
+    const last = lastRun();
+    if (!last) {
+      console.log("it has never actually run on this machine\n");
+    } else if (last.error) {
+      console.log(`last run ${last.at} FAILED: ${last.error}\n`);
+    } else {
+      const what = last.rebuilt.length ? `rebuilt ${last.rebuilt.join(", ")}` : "nothing was due";
+      console.log(`last run ${last.at} — ${what}\n`);
+    }
     for (const p of plan) {
       const cost = p.lastBuildMs == null ? "never timed" : `${Math.round(p.lastBuildMs / 1000)}s last time`;
       console.log(`  ${p.refresh ? "WOULD" : "skip "}  ${p.name.padEnd(18)} ${cost.padEnd(16)} ${p.reason}`);
@@ -1768,12 +1782,28 @@ async function cmdRefresh(args) {
     ? refreshPlan().filter((p) => p.commits > 0)
     : dueForRefresh();
 
-  if (!due.length) return console.log("Nothing to refresh.");
-  for (const t of due) {
-    console.log(`\n=== ${t.name} — ${t.reason}`);
-    // quiet: no clustering, no page. Accuracy lives in the index.
-    if (buildOneGraph(t.path, { quiet: true })) await indexOneGraph(t.path);
+  // Whatever happens next, it happened. This runs detached from a hook with
+  // its output going nowhere, so the only way anybody finds out it is broken
+  // is if it writes down that it ran.
+  const done = [];
+  let failure = null;
+  try {
+    for (const t of due) {
+      console.log(`\n=== ${t.name} — ${t.reason}`);
+      // quiet: no clustering, no page. Accuracy lives in the index.
+      if (buildOneGraph(t.path, { quiet: true })) {
+        await indexOneGraph(t.path);
+        done.push(t.name);
+      }
+    }
+  } catch (e) {
+    failure = e.message ?? String(e);
+    throw e;
+  } finally {
+    recordRun({ considered: due.length, rebuilt: done, error: failure });
   }
+
+  if (!due.length) console.log("Nothing to refresh.");
 }
 
 // ================================================================= diagram

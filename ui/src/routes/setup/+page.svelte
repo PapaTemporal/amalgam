@@ -471,6 +471,20 @@
       </p>
     {/if}
 
+    <p class="tiny" style="margin:.6rem 0 0">
+      {#if !refresh.last}
+        <span style="color:var(--warn)">It has never actually run on this machine.</span>
+        <span class="faint">Which is not the same as having nothing to do — see the table.</span>
+      {:else if refresh.last.error}
+        <span style="color:var(--bad)">Last run {refresh.last.at} failed: {refresh.last.error}</span>
+      {:else if refresh.last.rebuilt.length}
+        <span class="faint">Last ran {refresh.last.at} and rebuilt
+          <strong>{refresh.last.rebuilt.join(", ")}</strong>.</span>
+      {:else}
+        <span class="faint">Last ran {refresh.last.at}; nothing was due.</span>
+      {/if}
+    </p>
+
     <p class="tiny faint" style="margin:.6rem 0 0">
       At most {seconds(refresh.budgetMs)} per repository, and never the same one again inside
       {minutes(refresh.cooldownMs)}. A repository amalgam has not timed here is never started on a
