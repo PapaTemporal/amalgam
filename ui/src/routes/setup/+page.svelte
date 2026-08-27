@@ -1,6 +1,7 @@
 <script>
   import { get, post, watchJob } from "$lib/api.js";
   import Stepper from "$lib/Stepper.svelte";
+  import Picker from "$lib/Picker.svelte";
   import { page } from "$app/state";
   import { install, refreshInstall } from "$lib/install.svelte.js";
 
@@ -67,6 +68,31 @@
 
   // Not called `model`: this component already has a $state by that name, and
   // shadowing one reads badly even where it compiles.
+  /**
+   * Moving this machine somewhere else.
+   *
+   * A folder in both directions, because that is what the bundle is: no
+   * archiver in the runtime, and being able to open it and look beats being
+   * told what is in it.
+   */
+  let moving = $state(null);          // "export" | "import" | null
+  let moveResult = $state(null);
+  let moveError = $state(null);
+  let moveBusy = $state(false);
+
+  async function moveTo(dir) {
+    moveBusy = true;
+    moveError = null;
+    try {
+      moveResult = moving === "export"
+        ? { kind: "export", ...(await post("/transfer/export", { dir })) }
+        : { kind: "import", ...(await post("/transfer/import", { dir })) };
+      moving = null;
+      if (moveResult.kind === "import") { await load(); loadGaps(); }
+    } catch (e) { moveError = e.message; }
+    moveBusy = false;
+  }
+
   async function remap(tier, target) {
     try { await post("/models", { tier, model: target }); } catch (e) { alert(e.message); }
     loadRoute();
@@ -137,8 +163,13 @@
     follow(jobId, info?.installed ? "Reinstalling amalgam" : "Setting up amalgam");
   }
 
+  // Offered only when there is something to build, and never ticked by
+  // default: it can be minutes of this machine's time.
+  let buildToo = $state(false);
+  const needsBuild = $derived(gaps.some((g) => g.id === "repos"));
+
   async function runUpdate() {
-    const { jobId } = await post("/update", {});
+    const { jobId } = await post("/update", { build: buildToo });
     follow(jobId, "Updating amalgam");
   }
 
@@ -378,12 +409,90 @@
     {/if}
 
     <div>
+      {#if needsBuild}
+        <label class="opt tiny" style="margin:.6rem 0">
+          <input type="checkbox" bind:checked={buildToo} />
+          <span>
+            <strong>Also build the graphs this machine needs</strong>
+            <br /><span class="tiny muted">
+              Minutes, not seconds, on a large repository — and how this machine learns
+              what its own rebuilds cost, without which they never refresh themselves.
+            </span>
+          </span>
+        </label>
+      {/if}
+
       <button class:primary={info?.stale} onclick={runUpdate} disabled={job?.state === "running"}>
         {info?.stale ? "Update to the newer version" : "Pull and update"}
       </button>
     </div>
   </div>
 
+</div>
+
+<div class="card" style="margin-bottom:1.25rem">
+  <div class="spread">
+    <div>
+      <h2 style="margin:0">Moving to another machine</h2>
+      <p class="tiny muted" style="margin:.35rem 0 0;max-width:74ch">
+        An update carries code. It cannot carry what you have accumulated here — facts,
+        scenarios, your persona, the review queue, your project list and your routing settings —
+        because those are a file on this machine. This is that file, as a folder you can copy.
+      </p>
+    </div>
+    <div class="row">
+      <button onclick={() => { moving = "export"; moveResult = null; moveError = null; }}>Export</button>
+      <button class="ghost" onclick={() => { moving = "import"; moveResult = null; moveError = null; }}>Import</button>
+    </div>
+  </div>
+
+  {#if moving}
+    <p class="tiny faint" style="margin:.7rem 0 .4rem">
+      {moving === "export"
+        ? "Choose an empty folder to write the bundle into."
+        : "Choose the folder you copied over."}
+    </p>
+    <Picker onpick={moveTo} />
+    <button class="ghost tiny" style="margin-top:.5rem" onclick={() => (moving = null)}>Cancel</button>
+  {/if}
+
+  {#if moveBusy}<p class="tiny faint" style="margin:.7rem 0 0">Working…</p>{/if}
+  {#if moveError}<p class="tiny" style="color:var(--bad);margin:.7rem 0 0">{moveError}</p>{/if}
+
+  {#if moveResult?.kind === "export"}
+    <div class="done" style="margin-top:.8rem">
+      <strong class="tiny">Bundle written to <span class="mono">{moveResult.dir}</span></strong>
+      <table style="margin-top:.5rem">
+        <tbody>
+          {#each moveResult.carried as c}
+            <tr>
+              <td class="tiny mono">{(c.bytes / 1024).toFixed(0)} KB</td>
+              <td class="tiny">{c.what}{#if c.freed} <span class="faint">({(c.freed / 1048576).toFixed(0)} MB of code index left behind)</span>{/if}</td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+      <p class="tiny faint" style="margin:.6rem 0 0">
+        Copy the folder across, then <strong>Import</strong> it there. Build timings are not in it
+        on purpose — how long a rebuild takes is a fact about a machine, and the other one
+        learns its own the first time it builds.
+      </p>
+    </div>
+  {/if}
+
+  {#if moveResult?.kind === "import"}
+    <div class="done" style="margin-top:.8rem">
+      <strong class="tiny">Imported</strong>
+      <ul class="plain tiny" style="margin-top:.4rem">
+        {#each moveResult.done as line}<li>{line}</li>{/each}
+      </ul>
+      <p class="tiny faint" style="margin:.6rem 0 0">
+        Nothing that was already here was removed. Next, tick
+        <strong>Also build the graphs this machine needs</strong> above so it learns what its own
+        rebuilds cost.
+      </p>
+    </div>
+  {/if}
 </div>
 
 {#if route}
@@ -516,6 +625,12 @@
 {/if}
 
 <style>
+  .done {
+    border-left: 2px solid var(--good);
+    padding: .2rem 0 .2rem 1rem;
+  }
+  .done ul.plain li { padding: .12rem 0; color: var(--ink-dim); }
+
   .opt { display: flex; gap: .7rem; align-items: flex-start; cursor: pointer; }
   .opt input { margin-top: .3rem; }
   .two { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; align-items: start; }

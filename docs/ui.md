@@ -133,6 +133,28 @@ Everything on this page is an `amalgam` command shown as it runs. The first
 time still comes from a terminal — you need a clone before there is a UI to
 click — but from then on either works.
 
+#### Moving to another machine
+
+An update carries code. It cannot carry what you accumulated here — facts,
+scenarios, your persona, the review queue, your project list and your routing
+settings — because those are a file on this machine.
+
+**Export** writes them to a folder you pick; copy it across and **Import** it
+there. The bundle is small on purpose: the code index shares that same SQLite
+file, and it is left behind because every row of it is derived from
+repositories the other machine does not have. On this machine that is 341 MB
+not carried, leaving 848 KB that is.
+
+An empty machine takes the bundle whole, keeping the record of which
+corrections replaced what. A machine that already has facts of its own merges
+instead — importing never removes what was already there — and says which parts
+a merge cannot honestly carry.
+
+Build timings stay behind too. How long a rebuild takes is a fact about a
+machine, and carrying one machine's number would put the automatic refresh
+back to guessing. The other machine learns its own the first time it builds,
+which is what the tick-box beside **Update** is for.
+
 #### Keeping graphs current
 
 The one thing amalgam does without being asked, so it is the one thing that
