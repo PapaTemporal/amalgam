@@ -207,6 +207,7 @@ symbols rather than text, and hands you a merge order.
 | How it composes with BMAD into an SDLC | **[The workflow](docs/workflow.md)** |
 | Every command and tool, by the question it answers | **[Tool map](docs/tools.md)** |
 | The optional interface: wizards, dashboards, metrics | **[The interface](docs/ui.md)** |
+| What happens at session start, on every question, and at the end | **[Lifecycle diagrams](docs/lifecycle.html)** |
 | Which model runs a task, and who decides | **[Model routing](docs/models.md)** |
 | Requirements, wiring, proxies, updating | **[Installing](docs/install.md)** |
 | Why each part works the way it does | **[Design notes](docs/design.md)** |

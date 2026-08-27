@@ -1,0 +1,870 @@
+<title>Amalgam Lifecycle</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400&display=swap">
+
+<style>
+  :root {
+    --ground:      #f5f8f8;
+    --panel:       #ffffff;
+    --panel-2:     #eaf0f0;
+    --ink:         #14201f;
+    --ink-dim:     #46595a;
+    --ink-faint:   #7b8d8e;
+    --line:        #cbd8d8;
+    --local:       #17806f;
+    --local-soft:  #d4ebe6;
+    --wire:        #a86a12;
+    --wire-soft:   #f6e6cb;
+    --stop:        #b03b38;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+    --serif: "IBM Plex Serif", Georgia, "Times New Roman", serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:     #0e1416;
+      --panel:      #151d1f;
+      --panel-2:    #1c2628;
+      --ink:        #dde5e6;
+      --ink-dim:    #9fb0b1;
+      --ink-faint:  #6d7e80;
+      --line:       #2b3739;
+      --local:      #3fb8a8;
+      --local-soft: #14312e;
+      --wire:       #e0a03c;
+      --wire-soft:  #362a17;
+      --stop:       #e0706c;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:     #0e1416;
+    --panel:      #151d1f;
+    --panel-2:    #1c2628;
+    --ink:        #dde5e6;
+    --ink-dim:    #9fb0b1;
+    --ink-faint:  #6d7e80;
+    --line:       #2b3739;
+    --local:      #3fb8a8;
+    --local-soft: #14312e;
+    --wire:       #e0a03c;
+    --wire-soft:  #362a17;
+    --stop:       #e0706c;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 17px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 62rem;
+    margin: 0 auto;
+    padding: 4rem 1.5rem 6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 3.5rem;
+  }
+
+  header.top { display: flex; flex-direction: column; gap: .9rem; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: .72rem;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--local);
+  }
+
+  h1 {
+    font-family: var(--sans);
+    font-weight: 700;
+    font-size: clamp(2.1rem, 5vw, 3.1rem);
+    line-height: 1.08;
+    letter-spacing: -.02em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .standfirst {
+    font-size: 1.15rem;
+    color: var(--ink-dim);
+    max-width: 60ch;
+    margin: 0;
+  }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.2rem;
+    padding: .9rem 1.1rem;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    background: var(--panel);
+    font-family: var(--mono);
+    font-size: .78rem;
+    color: var(--ink-dim);
+  }
+  .key { display: flex; align-items: center; gap: .5rem; }
+  .swatch { width: 1.6rem; height: .28rem; border-radius: 1px; flex: none; }
+  .swatch.local { background: var(--local); }
+  .swatch.wire  { background: var(--wire); }
+  .swatch.stop  { background: var(--stop); }
+
+  section { display: flex; flex-direction: column; gap: 1.1rem; }
+
+  .phase-head { display: flex; align-items: baseline; gap: .9rem; }
+  .num {
+    font-family: var(--mono);
+    font-size: .78rem;
+    font-weight: 600;
+    color: var(--local);
+    border: 1px solid var(--local);
+    border-radius: 2px;
+    padding: .12rem .42rem;
+    flex: none;
+  }
+  h2 {
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 1.55rem;
+    letter-spacing: -.012em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  h3 {
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 1.02rem;
+    margin: 1.4rem 0 0;
+    color: var(--ink);
+  }
+  p { margin: 0; max-width: 66ch; }
+  p + p { margin-top: .85rem; }
+  .dim { color: var(--ink-dim); }
+
+  code {
+    font-family: var(--mono);
+    font-size: .86em;
+    background: var(--panel-2);
+    padding: .08em .34em;
+    border-radius: 2px;
+  }
+  strong { font-weight: 600; }
+  em { font-style: italic; }
+
+  figure {
+    margin: .6rem 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: .7rem;
+  }
+  .scroll {
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    background: var(--panel);
+    padding: 1.1rem;
+  }
+  svg.fig { display: block; max-width: 100%; height: auto; color: var(--ink-faint); }
+  figcaption {
+    font-family: var(--sans);
+    font-size: .84rem;
+    color: var(--ink-dim);
+    max-width: 70ch;
+  }
+
+  /* diagram primitives */
+  .bx   { fill: var(--panel-2); stroke: var(--line); stroke-width: 1; }
+  .bx-l { fill: var(--local-soft); stroke: var(--local); stroke-width: 1.2; }
+  .bx-w { fill: var(--wire-soft); stroke: var(--wire); stroke-width: 1.2; }
+  .bx-s { fill: none; stroke: var(--stop); stroke-width: 1.2; stroke-dasharray: 4 3; }
+  .t    { font-family: var(--mono); font-size: 12px; fill: var(--ink); }
+  .t-sm { font-family: var(--mono); font-size: 10.5px; fill: var(--ink-dim); }
+  .t-hd { font-family: var(--mono); font-size: 11px; fill: var(--ink); font-weight: 600; letter-spacing: .06em; }
+  .t-lo { font-family: var(--mono); font-size: 11px; fill: var(--local); font-weight: 600; letter-spacing: .06em; }
+  .t-wi { font-family: var(--mono); font-size: 11px; fill: var(--wire); font-weight: 600; letter-spacing: .06em; }
+  .t-st { font-family: var(--mono); font-size: 10.5px; fill: var(--stop); }
+  .ln   { stroke: var(--ink-faint); stroke-width: 1.2; fill: none; }
+  .ln-l { stroke: var(--local); stroke-width: 1.6; fill: none; }
+  .ln-w { stroke: var(--wire); stroke-width: 1.6; fill: none; }
+  .ln-s { stroke: var(--stop); stroke-width: 1.4; fill: none; stroke-dasharray: 5 3; }
+  .rule { stroke: var(--line); stroke-width: 1; stroke-dasharray: 3 4; }
+  .mk-n { fill: var(--ink-faint); }
+  .mk-l { fill: var(--local); }
+  .mk-w { fill: var(--wire); }
+  .mk-s { fill: var(--stop); }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--sans);
+    font-size: .88rem;
+  }
+  th {
+    text-align: left;
+    font-family: var(--mono);
+    font-size: .7rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 500;
+    padding: .5rem .7rem;
+    border-bottom: 1px solid var(--line);
+  }
+  td {
+    padding: .55rem .7rem;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+    color: var(--ink-dim);
+  }
+  td:first-child { color: var(--ink); font-family: var(--mono); font-size: .82rem; white-space: nowrap; }
+  .tbl { overflow-x: auto; }
+
+  .note {
+    border-left: 2px solid var(--local);
+    padding: .1rem 0 .1rem 1rem;
+    color: var(--ink-dim);
+    font-size: .97rem;
+    max-width: 64ch;
+  }
+
+  footer {
+    border-top: 1px solid var(--line);
+    padding-top: 1.4rem;
+    font-family: var(--sans);
+    font-size: .85rem;
+    color: var(--ink-faint);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="top">
+    <div class="eyebrow">Local offload stack · lifecycle reference</div>
+    <h1>What happens, and when</h1>
+    <p class="standfirst">
+      A session with amalgam has three moments that do real work: the one where it opens, every
+      one where you ask something, and the one where it ends. Almost all of it happens on your
+      machine. These diagrams show which parts, and what crosses the wire when they don't.
+    </p>
+    <div class="legend">
+      <span class="key"><span class="swatch local"></span> stays on this machine</span>
+      <span class="key"><span class="swatch wire"></span> crosses to the frontier model</span>
+      <span class="key"><span class="swatch stop"></span> a gate that refuses</span>
+    </div>
+  </header>
+
+  <!-- ============================================ OVERVIEW -->
+  <section>
+    <h2>The whole shape</h2>
+    <p class="dim">
+      The line across the middle is the only thing you pay for. Read the diagram by asking how
+      often anything crosses it: twice per question, and never at all when a session ends.
+    </p>
+
+    <figure>
+      <div class="scroll">
+        <svg class="fig" viewBox="0 0 920 384" role="img"
+             aria-label="Two lanes across three phases. The frontier model lane is crossed only twice per question — the task going up and the evidence packet coming back — while session start and session end happen entirely on the local machine.">
+          <defs>
+            <marker id="an1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="mk-n" d="M0 0 L10 5 L0 10 z"/>
+            </marker>
+            <marker id="al1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="mk-l" d="M0 0 L10 5 L0 10 z"/>
+            </marker>
+            <marker id="aw1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="mk-w" d="M0 0 L10 5 L0 10 z"/>
+            </marker>
+            <marker id="as1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="mk-s" d="M0 0 L10 5 L0 10 z"/>
+            </marker>
+          </defs>
+
+          <!-- lane labels -->
+          <text class="t-wi" x="0" y="34">FRONTIER MODEL</text>
+          <text class="t-sm" x="0" y="50">what you pay for</text>
+          <text class="t-lo" x="0" y="252">THIS MACHINE</text>
+          <text class="t-sm" x="0" y="268">free, and private</text>
+
+          <!-- the wire -->
+          <line class="rule" x1="0" y1="150" x2="920" y2="150"/>
+          <text class="t-sm" x="820" y="144">the wire</text>
+
+          <!-- phase headers -->
+          <text class="t-hd" x="150" y="14">1 · SESSION OPENS</text>
+          <text class="t-hd" x="410" y="14">2 · YOU ASK SOMETHING</text>
+          <text class="t-hd" x="700" y="14">3 · SESSION ENDS</text>
+          <line class="rule" x1="390" y1="0" x2="390" y2="384"/>
+          <line class="rule" x1="680" y1="0" x2="680" y2="384"/>
+
+          <!-- phase 1 -->
+          <rect class="bx-l" x="150" y="196" width="210" height="34" rx="2"/>
+          <text class="t" x="160" y="217">compare 2 commit ids · 2ms</text>
+          <rect class="bx-l" x="150" y="240" width="210" height="34" rx="2"/>
+          <text class="t" x="160" y="261">check the paths facts name</text>
+          <rect class="bx-w" x="150" y="60" width="210" height="52" rx="2"/>
+          <text class="t" x="160" y="80">directives (cached prefix)</text>
+          <text class="t" x="160" y="98">+ what changed while away</text>
+          <path class="ln-w" d="M255 196 L255 116" marker-end="url(#aw1)"/>
+
+          <!-- phase 2 -->
+          <rect class="bx-w" x="410" y="60" width="240" height="34" rx="2"/>
+          <text class="t" x="420" y="81">your question</text>
+          <rect class="bx-l" x="410" y="196" width="240" height="34" rx="2"/>
+          <text class="t" x="420" y="217">pick the symbols that matter</text>
+          <rect class="bx-l" x="410" y="240" width="240" height="34" rx="2"/>
+          <text class="t" x="420" y="261">read source, run the tests</text>
+          <rect class="bx-w" x="410" y="104" width="240" height="34" rx="2"/>
+          <text class="t" x="420" y="125">the packet, not the files</text>
+          <path class="ln-w" d="M450 196 L450 98" marker-start="url(#aw1)"/>
+          <path class="ln-w" d="M610 196 L610 142" marker-end="url(#aw1)"/>
+          <text class="t-sm" x="460" y="170">the task, down</text>
+          <text class="t-sm" x="574" y="192">98% smaller, up</text>
+
+          <!-- phase 3 -->
+          <rect class="bx-l" x="700" y="196" width="212" height="34" rx="2"/>
+          <text class="t" x="710" y="217">log the conversation</text>
+          <rect class="bx-l" x="700" y="240" width="212" height="34" rx="2"/>
+          <text class="t" x="710" y="261">propose what it learned</text>
+          <rect class="bx-l" x="700" y="284" width="212" height="34" rx="2"/>
+          <text class="t" x="710" y="305">rebuild stale graphs</text>
+          <text class="t-sm" x="700" y="336">the hook returns in 245ms;</text>
+          <text class="t-sm" x="700" y="352">the rest runs detached</text>
+          <text class="t-wi" x="700" y="82">nothing crosses</text>
+          <text class="t-sm" x="700" y="98">the session is over</text>
+        </svg>
+      </div>
+      <figcaption>
+        Two lanes, three phases. The wire is crossed exactly twice per question — the task going
+        up, the evidence packet coming back — and not at all when the session opens or ends.
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- ============================================ PHASE 1 -->
+  <section>
+    <div class="phase-head"><span class="num">1</span><h2>The session opens by reconciling</h2></div>
+    <p>
+      A session ends by writing down what it learned and rebuilding what fell behind. That covers
+      everything <em>that</em> session did, and nothing that happened between sessions — a pull, a
+      branch switch, work on another machine, an editor open in another window.
+    </p>
+    <p>
+      Those land on the state an agent trusts most. A stale index does not answer more slowly; it
+      answers wrongly, in the same tone as a right answer. So the opening asks two questions of
+      reality rather than of a cache.
+    </p>
+
+    <figure>
+      <div class="scroll">
+        <svg class="fig" viewBox="0 0 920 336" role="img"
+             aria-label="Session start compares the commit id stored in the graph against HEAD read from disk. When they match, nothing is said. When they differ, the changed files are named, or past forty commits the advice becomes rebuild.">
+          <defs>
+            <marker id="an2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="mk-n" d="M0 0 L10 5 L0 10 z"/>
+            </marker>
+            <marker id="al2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="mk-l" d="M0 0 L10 5 L0 10 z"/>
+            </marker>
+            <marker id="aw2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="mk-w" d="M0 0 L10 5 L0 10 z"/>
+            </marker>
+            <marker id="as2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="mk-s" d="M0 0 L10 5 L0 10 z"/>
+            </marker>
+          </defs>
+
+          <text class="t-hd" x="0" y="14">THE CHEAP QUESTION FIRST</text>
+
+          <rect class="bx" x="0" y="34" width="176" height="46" rx="2"/>
+          <text class="t" x="12" y="53">graph.json tail</text>
+          <text class="t-sm" x="12" y="70">built_at_commit</text>
+
+          <rect class="bx" x="0" y="98" width="176" height="46" rx="2"/>
+          <text class="t" x="12" y="117">.git/HEAD on disk</text>
+          <text class="t-sm" x="12" y="134">a file, not a git process</text>
+
+          <path class="ln" d="M176 57 L246 80" marker-end="url(#an2)"/>
+          <path class="ln" d="M176 121 L246 98" marker-end="url(#an2)"/>
+
+          <rect class="bx-l" x="248" y="66" width="150" height="46" rx="2"/>
+          <text class="t" x="260" y="85">same id?</text>
+          <text class="t-sm" x="260" y="102">2ms, no walk</text>
+
+          <!-- current -->
+          <path class="ln-l" d="M398 78 L470 48" marker-end="url(#al2)"/>
+          <text class="t-sm" x="404" y="46">yes</text>
+          <rect class="bx-l" x="472" y="26" width="200" height="40" rx="2"/>
+          <text class="t" x="484" y="51">say nothing at all</text>
+          <text class="t-sm" x="686" y="42">a notice printed every session</text>
+          <text class="t-sm" x="686" y="58">stops being read by the third</text>
+
+          <!-- behind -->
+          <path class="ln" d="M398 100 L470 132" marker-end="url(#an2)"/>
+          <text class="t-sm" x="404" y="130">no</text>
+          <rect class="bx" x="472" y="110" width="200" height="44" rx="2"/>
+          <text class="t" x="484" y="130">count the commits</text>
+          <text class="t-sm" x="484" y="146">rev-list --count</text>
+
+          <path class="ln" d="M672 124 L742 100" marker-end="url(#an2)"/>
+          <rect class="bx" x="744" y="76" width="176" height="46" rx="2"/>
+          <text class="t" x="756" y="95">name the files</text>
+          <text class="t-sm" x="756" y="112">"read these directly"</text>
+
+          <path class="ln-s" d="M672 142 L742 170" marker-end="url(#as2)"/>
+          <rect class="bx-s" x="744" y="148" width="176" height="46" rx="2"/>
+          <text class="t" x="756" y="167">over 40 behind:</text>
+          <text class="t-st" x="756" y="184">rebuild instead</text>
+
+          <line class="rule" x1="0" y1="222" x2="920" y2="222"/>
+
+          <text class="t-hd" x="0" y="250">AND THE OTHER HALF</text>
+          <rect class="bx" x="0" y="266" width="246" height="46" rx="2"/>
+          <text class="t" x="12" y="285">every live fact</text>
+          <text class="t-sm" x="12" y="302">does the path it names still exist?</text>
+          <path class="ln" d="M246 289 L316 289" marker-end="url(#an2)"/>
+          <rect class="bx" x="318" y="266" width="246" height="46" rx="2"/>
+          <text class="t" x="330" y="285">vanished ones flagged</text>
+          <text class="t-sm" x="330" y="302">not "wrong" — nothing judges that</text>
+          <text class="t-sm" x="590" y="285">a fact recorded in good faith names a path;</text>
+          <text class="t-sm" x="590" y="301">months later the path is gone and recall</text>
+          <text class="t-sm" x="590" y="317">still states it with full confidence</text>
+        </svg>
+      </div>
+      <figcaption>
+        The common case is that nothing changed, so the common case costs two commit ids compared —
+        no git process, no walk of history. Only a repository that actually moved pays for the file
+        list, and only up to a point: past forty commits, naming four hundred files is not advice
+        anyone can act on.
+      </figcaption>
+    </figure>
+
+    <p class="note">
+      It reports; it does not repair. Rebuilding here would either make you wait for your first
+      prompt or move the index underneath a session already using it.
+    </p>
+  </section>
+
+  <!-- ============================================ PHASE 2 -->
+  <section>
+    <div class="phase-head"><span class="num">2</span><h2>A question becomes evidence, not files</h2></div>
+    <p>
+      This is the loop that runs all day. The claim it rests on: <strong>the graph decides which
+      lines matter, and the working tree supplies what they say.</strong> Those are two different
+      sources, and keeping them separate is what makes a stale graph cost precision instead of
+      correctness.
+    </p>
+
+    <figure>
+      <div class="scroll">
+        <svg class="fig" viewBox="0 0 920 428" role="img"
+             aria-label="A task is turned into symbols by one of three selection paths depending on what is installed, then each symbol's current source is read from the working tree, producing a packet far smaller than the files it replaced.">
+          <defs>
+            <marker id="an3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="mk-n" d="M0 0 L10 5 L0 10 z"/>
+            </marker>
+            <marker id="al3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="mk-l" d="M0 0 L10 5 L0 10 z"/>
+            </marker>
+            <marker id="aw3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="mk-w" d="M0 0 L10 5 L0 10 z"/>
+            </marker>
+            <marker id="as3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="mk-s" d="M0 0 L10 5 L0 10 z"/>
+            </marker>
+          </defs>
+
+          <rect class="bx-w" x="0" y="14" width="168" height="42" rx="2"/>
+          <text class="t" x="12" y="33">the task, in words</text>
+          <text class="t-sm" x="12" y="50">"where do orders go"</text>
+
+          <path class="ln" d="M168 35 L214 35" marker-end="url(#an3)"/>
+
+          <text class="t-hd" x="216" y="10">WHICH SYMBOLS — ONE OF THREE PATHS</text>
+          <rect class="bx" x="216" y="14" width="392" height="128" rx="2"/>
+
+          <rect class="bx-l" x="230" y="26" width="364" height="32" rx="2"/>
+          <text class="t" x="240" y="46">both models — meaning, then a local re-rank</text>
+          <rect class="bx-l" x="230" y="64" width="364" height="32" rx="2"/>
+          <text class="t" x="240" y="84">embeddings only — meaning, plus graph neighbours</text>
+          <rect class="bx-l" x="230" y="102" width="364" height="28" rx="2"/>
+          <text class="t" x="240" y="120">nothing installed — words, split and stemmed</text>
+
+          <path class="ln" d="M608 78 L654 78" marker-end="url(#an3)"/>
+
+          <rect class="bx" x="656" y="46" width="264" height="64" rx="2"/>
+          <text class="t" x="668" y="66">5 symbols, with their</text>
+          <text class="t" x="668" y="84">callers and callees</text>
+          <text class="t-sm" x="668" y="101">from the index</text>
+
+          <!-- the second source -->
+          <line class="rule" x1="0" y1="176" x2="920" y2="176"/>
+          <text class="t-hd" x="0" y="204">THEN THE OTHER SOURCE</text>
+
+          <rect class="bx-l" x="0" y="216" width="264" height="64" rx="2"/>
+          <text class="t" x="12" y="236">the working tree, right now</text>
+          <text class="t-sm" x="12" y="253">not what the index remembers</text>
+          <text class="t-sm" x="12" y="269">a moved symbol is found by name</text>
+
+          <path class="ln-l" d="M264 248 L330 248" marker-end="url(#al3)"/>
+
+          <rect class="bx" x="332" y="216" width="276" height="64" rx="2"/>
+          <text class="t" x="344" y="236">14 lines each, as they read</text>
+          <text class="t-sm" x="344" y="253">today, on disk</text>
+          <text class="t-st" x="344" y="271">gone? it says so, rather than quoting</text>
+
+          <path class="ln-w" d="M608 248 L654 248" marker-end="url(#aw3)"/>
+
+          <rect class="bx-w" x="656" y="216" width="264" height="64" rx="2"/>
+          <text class="t" x="668" y="236">the packet</text>
+          <text class="t-sm" x="668" y="253">1,848 characters</text>
+          <text class="t-sm" x="668" y="271">this is all that crosses</text>
+
+          <!-- counterfactual -->
+          <rect class="bx-s" x="656" y="300" width="264" height="56" rx="2"/>
+          <text class="t-st" x="668" y="320">what it replaced: 380,924</text>
+          <text class="t-sm" x="668" y="337">the whole of both files</text>
+          <path class="ln-s" d="M788 300 L788 284" marker-end="url(#as3)"/>
+          <text class="t-sm" x="656" y="378">measured, not estimated — the tool</text>
+          <text class="t-sm" x="656" y="394">records what it would have read</text>
+
+          <text class="t-sm" x="0" y="320">Other tools on this side of the line:</text>
+          <text class="t-sm" x="0" y="340">run_check — the exit code and the failing lines, never the log</text>
+          <text class="t-sm" x="0" y="358">digest — a long file reduced here, only the digest crosses</text>
+          <text class="t-sm" x="0" y="376">graph_impact — what a diff reaches, without reading the diff</text>
+          <text class="t-sm" x="0" y="394">memory_recall — what you decided before, loaded locally</text>
+        </svg>
+      </div>
+      <figcaption>
+        Selection degrades in three steps depending on what is installed, but the second half never
+        changes: whatever picked the symbols, their text is read from the working tree at the moment
+        of asking. The counterfactual is recorded rather than estimated — the tool knows which files
+        it spared you.
+      </figcaption>
+    </figure>
+
+    <h3>What each configuration is actually worth</h3>
+    <div class="tbl">
+      <table>
+        <thead>
+          <tr><th>Asked</th><th>Nothing installed</th><th>Embeddings</th><th>Both</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>in the code's own words</td><td>10 of 12 first</td><td>11 of 12</td><td>11 of 12</td></tr>
+          <tr><td>by intent, sharing no word</td><td>0 of 12</td><td>3 of 12 in top five</td><td>4 of 12</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="dim" style="font-size:.92rem">
+      Two different questions, never averaged. Words reach what shares words with them; nothing
+      reaches <code>verifyFact</code> from "how do we decide a stored memory has gone out of date"
+      except a model that has read both.
+    </p>
+  </section>
+
+  <!-- ============================================ PHASE 3 -->
+  <section>
+    <div class="phase-head"><span class="num">3</span><h2>The session ends without making you wait</h2></div>
+    <p>
+      A hook runs while you are waiting for your prompt back, so the rule is strict: the cheap half
+      happens now, the expensive halves are handed to detached children and forgotten about.
+      Nothing here can delay a session ending, and nothing it fails at can prevent one.
+    </p>
+
+    <figure>
+      <div class="scroll">
+        <svg class="fig" viewBox="0 0 920 372" role="img"
+             aria-label="The session end hook logs the conversation inline and returns in 245 milliseconds, then two detached children run: one proposing facts, one refreshing stale graphs behind five gates.">
+          <defs>
+            <marker id="an4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="mk-n" d="M0 0 L10 5 L0 10 z"/>
+            </marker>
+            <marker id="al4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="mk-l" d="M0 0 L10 5 L0 10 z"/>
+            </marker>
+            <marker id="aw4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="mk-w" d="M0 0 L10 5 L0 10 z"/>
+            </marker>
+            <marker id="as4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="mk-s" d="M0 0 L10 5 L0 10 z"/>
+            </marker>
+          </defs>
+
+          <rect class="bx-w" x="0" y="20" width="150" height="42" rx="2"/>
+          <text class="t" x="12" y="39">session ends</text>
+          <text class="t-sm" x="12" y="56">the hook fires</text>
+
+          <path class="ln" d="M150 41 L196 41" marker-end="url(#an4)"/>
+
+          <rect class="bx-l" x="198" y="20" width="196" height="42" rx="2"/>
+          <text class="t" x="210" y="39">log turns to raw</text>
+          <text class="t-sm" x="210" y="56">a few inserts, inline</text>
+
+          <path class="ln-l" d="M394 41 L440 41" marker-end="url(#al4)"/>
+          <rect class="bx-l" x="442" y="20" width="180" height="42" rx="2"/>
+          <text class="t" x="454" y="39">returns in 245ms</text>
+          <text class="t-sm" x="454" y="56">you get your prompt back</text>
+
+          <text class="t-sm" x="636" y="39">everything below this line</text>
+          <text class="t-sm" x="636" y="55">runs after you have gone</text>
+
+          <line class="rule" x1="0" y1="86" x2="920" y2="86"/>
+
+          <!-- child one -->
+          <text class="t-hd" x="0" y="112">DETACHED · WHAT IT LEARNED</text>
+          <rect class="bx" x="0" y="126" width="200" height="40" rx="2"/>
+          <text class="t" x="12" y="145">six turns or more?</text>
+          <text class="t-sm" x="12" y="161">one question decided nothing</text>
+          <path class="ln" d="M200 146 L246 146" marker-end="url(#an4)"/>
+          <rect class="bx" x="248" y="126" width="190" height="40" rx="2"/>
+          <text class="t" x="260" y="145">local model reads it</text>
+          <text class="t-sm" x="260" y="161">proposes durable facts</text>
+          <path class="ln" d="M438 146 L484 146" marker-end="url(#an4)"/>
+          <rect class="bx-s" x="486" y="126" width="206" height="40" rx="2"/>
+          <text class="t" x="498" y="145">already said? drop it</text>
+          <text class="t-st" x="498" y="161">against pending AND accepted</text>
+          <path class="ln" d="M692 146 L738 146" marker-end="url(#an4)"/>
+          <rect class="bx" x="740" y="126" width="180" height="40" rx="2"/>
+          <text class="t" x="752" y="145">waits for review</text>
+          <text class="t-sm" x="752" y="161">never auto-accepted</text>
+
+          <!-- child two -->
+          <text class="t-hd" x="0" y="216">DETACHED · WHAT FELL BEHIND</text>
+          <rect class="bx" x="0" y="230" width="200" height="40" rx="2"/>
+          <text class="t" x="12" y="249">every registered repo</text>
+          <text class="t-sm" x="12" y="265">deduplicated first</text>
+          <path class="ln" d="M200 250 L246 250" marker-end="url(#an4)"/>
+
+          <rect class="bx-s" x="248" y="212" width="272" height="76" rx="2"/>
+          <text class="t-st" x="260" y="230">five gates, any one refuses</text>
+          <text class="t-sm" x="260" y="248">no graph · already current</text>
+          <text class="t-sm" x="260" y="264">never timed here · over 90s</text>
+          <text class="t-sm" x="260" y="280">built within the last 30 min</text>
+
+          <path class="ln-l" d="M520 250 L566 250" marker-end="url(#al4)"/>
+          <rect class="bx-l" x="568" y="230" width="164" height="40" rx="2"/>
+          <text class="t" x="580" y="249">rebuild and re-index</text>
+          <text class="t-sm" x="580" y="265">one transaction</text>
+
+          <path class="ln-l" d="M732 250 L778 250" marker-end="url(#al4)"/>
+          <rect class="bx-l" x="780" y="230" width="140" height="40" rx="2"/>
+          <text class="t" x="792" y="249">write down</text>
+          <text class="t" x="792" y="265">that it ran</text>
+
+          <text class="t-sm" x="568" y="312">Because a detached child whose output is</text>
+          <text class="t-sm" x="568" y="328">discarded looks exactly like one that</text>
+          <text class="t-sm" x="568" y="344">never started at all.</text>
+          <text class="t-sm" x="0" y="312">"Never timed here" is the cold start: build costs are</text>
+          <text class="t-sm" x="0" y="328">recorded per machine, so a repository set up elsewhere</text>
+          <text class="t-sm" x="0" y="344">arrives with a graph and no idea what a rebuild costs.</text>
+          <text class="t-sm" x="0" y="360">One build by hand clears it, and it self-maintains after.</text>
+        </svg>
+      </div>
+      <figcaption>
+        Two independent children, because a graph going stale has nothing to do with whether
+        conversations are being kept. The gates exist so that ending three sessions in an hour does
+        not mean three rebuilds of the same repository.
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- ============================================ MEMORY -->
+  <section>
+    <h2>Two ways into memory, one of them gated</h2>
+    <p>
+      Four layers, and two ways into the one that matters. Telling the agent something is worth
+      keeping writes it there and then. What a <em>finished</em> session merely inferred is
+      different: <strong>nothing it guessed becomes a memory without a person saying so.</strong>
+      Recall treats every stored fact as equally true, which is exactly why the second door has a
+      queue in front of it.
+    </p>
+
+    <figure>
+      <div class="scroll">
+        <svg class="fig" viewBox="0 0 920 396" role="img"
+             aria-label="Two doors into long-term memory: a fact you ask for during a session is written straight in, while facts a finished session proposed wait in a queue that only a terminal command clears.">
+          <defs>
+            <marker id="an5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="mk-n" d="M0 0 L10 5 L0 10 z"/>
+            </marker>
+            <marker id="al5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="mk-l" d="M0 0 L10 5 L0 10 z"/>
+            </marker>
+            <marker id="aw5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="mk-w" d="M0 0 L10 5 L0 10 z"/>
+            </marker>
+            <marker id="as5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="mk-s" d="M0 0 L10 5 L0 10 z"/>
+            </marker>
+          </defs>
+
+          <text class="t-hd" x="0" y="14">TWO DOORS IN, AND ONLY ONE OF THEM WAITS</text>
+
+          <!-- door one: you ask, during the session -->
+          <rect class="bx-l" x="0" y="30" width="250" height="52" rx="2"/>
+          <text class="t" x="12" y="50">you, mid-session</text>
+          <text class="t-sm" x="12" y="68">"remember that we decided X"</text>
+
+          <path class="ln-l" d="M250 56 L612 56" marker-end="url(#al5)"/>
+          <text class="t-sm" x="286" y="48">the agent calls memory_save_fact</text>
+          <text class="t-sm" x="286" y="76">straight in — no queue, no waiting</text>
+
+          <!-- door two: the session ended and guessed -->
+          <rect class="bx" x="0" y="112" width="250" height="52" rx="2"/>
+          <text class="t-hd" x="12" y="132">L0 · RAW LOG</text>
+          <text class="t-sm" x="12" y="150">30 days or 5,000 rows, then pruned</text>
+
+          <path class="ln" d="M250 138 L286 138" marker-end="url(#an5)"/>
+
+          <rect class="bx-s" x="288" y="112" width="250" height="52" rx="2"/>
+          <text class="t-st" x="300" y="132">PROPOSALS</text>
+          <text class="t-sm" x="300" y="150">what a finished session inferred</text>
+
+          <path class="ln" d="M538 138 L612 138" marker-end="url(#an5)"/>
+          <text class="t-sm" x="360" y="182">nothing here ever expires, and nothing</text>
+          <text class="t-sm" x="360" y="198">here is ever accepted on its own</text>
+
+          <!-- L1 -->
+          <rect class="bx-l" x="614" y="30" width="250" height="134" rx="2"/>
+          <text class="t-hd" x="626" y="52">L1 · FACTS</text>
+          <text class="t" x="626" y="74">what is known</text>
+          <text class="t-sm" x="626" y="96">paths checked on the way in,</text>
+          <text class="t-sm" x="626" y="112">and again every session start</text>
+          <text class="t-sm" x="626" y="136">a near-duplicate is reported,</text>
+          <text class="t-sm" x="626" y="152">so it supersedes, not competes</text>
+
+          <line class="rule" x1="0" y1="222" x2="920" y2="222"/>
+
+          <!-- the other layers -->
+          <rect class="bx" x="0" y="248" width="292" height="66" rx="2"/>
+          <text class="t-hd" x="12" y="268">L2 · SCENARIOS</text>
+          <text class="t" x="12" y="288">where a project actually is</text>
+          <text class="t-sm" x="12" y="305">written deliberately, read on demand</text>
+
+          <rect class="bx" x="312" y="248" width="292" height="66" rx="2"/>
+          <text class="t-hd" x="324" y="268">L3 · PERSONA</text>
+          <text class="t" x="324" y="288">how you want to be worked with</text>
+          <text class="t-sm" x="324" y="305">read first, every session</text>
+
+          <rect class="bx-w" x="624" y="248" width="296" height="66" rx="2"/>
+          <text class="t-hd" x="636" y="268">WHAT REACHES THE MODEL</text>
+          <text class="t" x="636" y="288">a few keywords' worth</text>
+          <text class="t-sm" x="636" y="305">recalled here, not by reading files</text>
+
+          <path class="ln-w" d="M292 281 L306 281" marker-end="url(#aw5)"/>
+          <path class="ln-w" d="M604 281 L618 281" marker-end="url(#aw5)"/>
+
+          <text class="t-sm" x="0" y="348">The queue is the part that surprises people: it is cleared from a terminal, not from the</text>
+          <text class="t-sm" x="0" y="364">interface and not by being asked. Nothing interrupts a session to request approval.</text>
+          <text class="t-sm" x="0" y="380">A fact you ask for during a session never goes near it.</text>
+        </svg>
+      </div>
+      <figcaption>
+        Asking for something to be remembered writes it immediately. The queue holds only what a
+        finished session <em>guessed</em> was worth keeping — which is why it refusing repeats
+        matters more than it being emptied.
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- ============================================ ROUTING -->
+  <section>
+    <h2>Choosing what answers you</h2>
+    <p>
+      The newest piece, and off by default. A session otherwise runs on whatever model the agent
+      defaults to, which means the same model answers <em>"what does this function return"</em> and
+      <em>"redesign the scheduler"</em>. Sizing a task is a classification, and that is the thing a
+      small local model is genuinely good at.
+    </p>
+
+    <figure>
+      <div class="scroll">
+        <svg class="fig" viewBox="0 0 920 308" role="img"
+             aria-label="The local model reads the task and picks one of four tiers before anything is sent; failures fall through to deterministic rules, and the choice is shown with its reason and can be overridden with one click.">
+          <defs>
+            <marker id="an6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="mk-n" d="M0 0 L10 5 L0 10 z"/>
+            </marker>
+            <marker id="al6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="mk-l" d="M0 0 L10 5 L0 10 z"/>
+            </marker>
+            <marker id="aw6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="mk-w" d="M0 0 L10 5 L0 10 z"/>
+            </marker>
+            <marker id="as6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="mk-s" d="M0 0 L10 5 L0 10 z"/>
+            </marker>
+          </defs>
+
+          <rect class="bx-w" x="0" y="76" width="150" height="42" rx="2"/>
+          <text class="t" x="12" y="95">the task, composed</text>
+          <text class="t-sm" x="12" y="112">before it is sent</text>
+
+          <path class="ln" d="M150 97 L196 97" marker-end="url(#an6)"/>
+
+          <rect class="bx-l" x="198" y="76" width="176" height="42" rx="2"/>
+          <text class="t" x="210" y="95">local model sizes it</text>
+          <text class="t-sm" x="210" y="112">about a second</text>
+
+          <path class="ln-s" d="M286 118 L286 158" marker-end="url(#as6)"/>
+          <rect class="bx-s" x="198" y="160" width="176" height="42" rx="2"/>
+          <text class="t-st" x="210" y="179">no model? rules</text>
+          <text class="t-sm" x="210" y="196">timid: unsure stays high</text>
+
+          <path class="ln-l" d="M374 97 L420 97" marker-end="url(#al6)"/>
+
+          <rect class="bx" x="422" y="14" width="230" height="30" rx="2"/>
+          <text class="t" x="434" y="34">mechanical · Haiku 4.5</text>
+          <rect class="bx" x="422" y="50" width="230" height="30" rx="2"/>
+          <text class="t" x="434" y="70">clear spec · Sonnet 5</text>
+          <rect class="bx-l" x="422" y="86" width="230" height="30" rx="2"/>
+          <text class="t" x="434" y="106">judgement · Opus 5 (default)</text>
+          <rect class="bx" x="422" y="122" width="230" height="30" rx="2"/>
+          <text class="t" x="434" y="142">hard and long · Fable 5</text>
+
+          <path class="ln-w" d="M652 100 L710 100" marker-end="url(#aw6)"/>
+
+          <rect class="bx-w" x="712" y="76" width="208" height="42" rx="2"/>
+          <text class="t" x="724" y="95">shown, with its reason</text>
+          <text class="t-sm" x="724" y="112">one click overrides it</text>
+
+          <text class="t-sm" x="422" y="180">Unsure lands on Opus, never Haiku:</text>
+          <text class="t-sm" x="422" y="196">hedging high wastes money, hedging</text>
+          <text class="t-sm" x="422" y="212">low wastes the work — and the work</text>
+          <text class="t-sm" x="422" y="228">is worth more.</text>
+
+          <line class="rule" x1="0" y1="252" x2="920" y2="252"/>
+          <text class="t-sm" x="0" y="276">Measured against tasks labelled by hand: 8 of 9 land where a careful person would put them,</text>
+          <text class="t-sm" x="0" y="294">and none land on a model too weak for the work — the direction that would actually cost you.</text>
+        </svg>
+      </div>
+      <figcaption>
+        Everything about the decision is visible before it takes effect, because being quietly moved
+        to a cheaper model is a thing done <em>to</em> somebody. It routes among models the installed
+        agent can run — not between agents.
+      </figcaption>
+    </figure>
+  </section>
+
+  <footer>
+    Drawn from the code as it stands, not from intent. Figures for packet size, retrieval and
+    routing are measured on this repository and re-run rather than recalled; the 245ms and 2ms
+    timings are from this machine.
+  </footer>
+
+</div>
