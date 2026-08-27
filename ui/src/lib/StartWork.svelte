@@ -21,7 +21,8 @@
    * one already composed. The name in the link is the label somebody would
    * say out loud, not an internal id, because the link is read by people.
    */
-  let { projectKey, onstart, disabled = false } = $props();
+  let { projectKey, onstart, oncompose = null, routed = null, tiers = null,
+        onretier = null, disabled = false } = $props();
 
   let data = $state(null);
   let hat = $state(0);
@@ -83,6 +84,9 @@
     picked = item;
     text = item.template ? item.template.replace("{{input}}", "") : item.prefill;
     if (link) remember(slug(item.label));
+    // Sized on what is actually composed, including the label — "Fix a bug"
+    // carries information the bare command does not.
+    oncompose?.(`${item.label}. ${text}`);
   }
 
   /** Keep the address bar honest without adding a history entry per click. */
@@ -193,7 +197,25 @@
       </div>
 
       <textarea bind:value={text} rows={picked.template ? 6 : 2}
+                onblur={() => oncompose?.(`${picked.label}. ${text}`)}
                 placeholder={picked.ask ? picked.ask : "edit before running, or run as it is"}></textarea>
+
+      {#if routed}
+        <div class="routed">
+          <span class="tiny faint">runs on</span>
+          <strong class="tiny">{routed.label}</strong>
+          <span class="tiny faint">— {routed.why} ({routed.by})</span>
+          {#if tiers}
+            <span class="spacer"></span>
+            {#each tiers as t}
+              {#if t.id !== routed.tier}
+                <button class="linky tiny" title={t.note}
+                        onclick={() => onretier?.(t.id)}>use {t.label}</button>
+              {/if}
+            {/each}
+          {/if}
+        </div>
+      {/if}
 
       <div class="spread">
         <span class="tiny faint">
@@ -272,6 +294,9 @@
   .compose { display: flex; flex-direction: column; gap: .5rem; margin-top: .9rem;
              border-top: 1px solid var(--line); padding-top: .8rem; }
   .compose textarea { width: 100%; resize: vertical; font: inherit; font-size: .85rem; }
+
+  .routed { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; margin-top: .4rem; }
+  .routed .spacer { flex: 1; min-width: .5rem; }
 
   .roles { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; margin-bottom: .6rem; }
   .specialists { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; margin-top: .7rem; }

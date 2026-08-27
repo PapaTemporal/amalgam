@@ -50,6 +50,28 @@
   const seconds = (ms) => `${Math.round(ms / 1000)}s`;
   const minutes = (ms) => `${Math.round(ms / 60000)} minutes`;
 
+  /**
+   * Which model runs a task.
+   *
+   * Off by default and shown before every run, because being quietly moved to
+   * a cheaper model is a thing done TO somebody rather than for them.
+   */
+  let route = $state(null);
+  const loadRoute = () => get("/models").then((m) => (route = m)).catch(() => {});
+  $effect(() => { if (!route) loadRoute(); });
+
+  async function toggleRouting() {
+    try { await post("/models", { enabled: !route.enabled }); } catch (e) { alert(e.message); }
+    loadRoute();
+  }
+
+  // Not called `model`: this component already has a $state by that name, and
+  // shadowing one reads badly even where it compiles.
+  async function remap(tier, target) {
+    try { await post("/models", { tier, model: target }); } catch (e) { alert(e.message); }
+    loadRoute();
+  }
+
   async function fixGap(gap) {
     const { jobId } = await post(gap.action.endpoint, {});
     follow(jobId, gap.action.label);
@@ -363,6 +385,67 @@
   </div>
 
 </div>
+
+{#if route}
+  <div class="card" style="margin-bottom:1.25rem">
+    <div class="spread">
+      <div>
+        <h2 style="margin:0">Which model runs a task</h2>
+        <p class="tiny muted" style="margin:.35rem 0 0;max-width:74ch">
+          The local model reads what you are about to ask and says how hard it is, before any of
+          it leaves the machine. A rename and a redesign do not need the same model, and sizing
+          them is a classification — which is what a small local model is good at.
+        </p>
+      </div>
+      <button class:primary={!route.enabled} onclick={toggleRouting} disabled={route.forced}>
+        {route.enabled ? "Turn it off" : "Turn it on"}
+      </button>
+    </div>
+
+    {#if route.forced}
+      <p class="tiny faint" style="margin:.5rem 0 0">
+        Held <strong>{route.enabled ? "on" : "off"}</strong> by
+        <span class="mono">AMALGAM_ROUTE_MODELS</span> in this environment.
+      </p>
+    {/if}
+
+    <p class="tiny faint" style="margin:.6rem 0 0">
+      The choice is shown with its reason before the session starts, and one click overrides it —
+      nothing is ever switched silently. Anything the local model is not sure about lands on
+      <strong>{route.tiers.find((t) => t.id === route.defaultTier)?.label}</strong>, because sending
+      hard work to a weak model wastes the work, while the reverse only wastes money.
+    </p>
+
+    <table style="margin-top:.7rem">
+      <thead><tr><th>When</th><th>Model</th><th>Per 1M in / out</th></tr></thead>
+      <tbody>
+        {#each route.tiers as t}
+          <tr>
+            <td class="tiny">{t.note}</td>
+            <td>
+              <input type="text" class="mono tiny" value={route.models[t.id]}
+                     onchange={(e) => remap(t.id, e.currentTarget.value)} />
+              <span class="tiny faint">{t.label} · {t.context} context</span>
+            </td>
+            <td class="tiny faint">${t.price.in} / ${t.price.out}</td>
+          </tr>
+        {/each}
+      </tbody>
+    </table>
+
+    <p class="tiny faint" style="margin:.6rem 0 0">
+      Prices are first-party API rates, carried so one choice can be compared with another; a
+      session billed against a subscription will not see them. Point a row at any model the agent
+      accepts — a new one does not need a new version of amalgam.
+    </p>
+
+    <p class="tiny faint" style="margin:.4rem 0 0">
+      Only models the installed agent can run. amalgam drives Claude Code, so GPT and Copilot are
+      not options here: Copilot is a different CLI speaking a different protocol, and routing to
+      it would be a session runtime rather than a table.
+    </p>
+  </div>
+{/if}
 
 {#if refresh}
   <div class="card" style="margin-bottom:1.25rem">

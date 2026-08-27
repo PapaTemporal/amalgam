@@ -119,6 +119,35 @@ import RemoveProject from "$lib/RemoveProject.svelte";
    * parallelism, it is a merge conflict being written twice. Null means the
    * project itself.
    */
+  /**
+   * Which model the next session runs on.
+   *
+   * Previewed when a task is composed, not decided at Run: being told after
+   * the fact which model answered you is not the same as choosing.
+   */
+  let routed = $state(null);
+  let routing = $state(false);
+  let catalogue = $state(null);
+  $effect(() => { if (!catalogue) get("/models").then((m) => (catalogue = m)).catch(() => {}); });
+
+  async function sizeUp(task) {
+    if (!catalogue?.enabled || !task?.trim()) { routed = null; return; }
+    routing = true;
+    try {
+      const r = await post("/route", { task, permissionMode });
+      routed = r.off ? null : r;
+    } catch { routed = null; }
+    routing = false;
+  }
+
+  /** An override is a choice, so it says so rather than pretending it routed. */
+  function useTier(id) {
+    const t = catalogue?.tiers.find((x) => x.id === id);
+    if (!t) return;
+    routed = { ...routed, tier: id, label: t.label, note: t.note,
+               model: catalogue.models[id], by: "you", why: "chosen by hand" };
+  }
+
   let where = $state(null);
   const places = $derived([
     { label: data?.project?.name ?? "this project", path: null, note: "the project itself" },
@@ -196,7 +225,12 @@ import RemoveProject from "$lib/RemoveProject.svelte";
     starting = true;
     startError = null;
     try {
-      const out = await post("/session/start", { cwd: where ?? p.path, prompt, title, permissionMode });
+      const out = await post("/session/start", {
+        cwd: where ?? p.path, prompt, title, permissionMode,
+        // Whatever the chip says — which is the routed choice unless somebody
+        // changed it. Null means the agent's own default.
+        model: routed?.model ?? null,
+      });
       sessionTitle = title ?? "Session";
       sessionId = out.id;
       refreshSessions();
@@ -369,7 +403,9 @@ import RemoveProject from "$lib/RemoveProject.svelte";
     {/if}
 
     <div style="margin-top:.7rem">
-      <StartWork projectKey={key} onstart={startWith} disabled={starting || !agent?.cli} />
+      <StartWork projectKey={key} onstart={startWith} disabled={starting || !agent?.cli}
+                 oncompose={sizeUp} routed={routed} onretier={useTier}
+                 tiers={catalogue?.enabled ? catalogue.tiers : null} />
     </div>
 
     {#if startError}<p class="tiny" style="color:var(--bad);margin-top:.5rem">{startError}</p>{/if}
