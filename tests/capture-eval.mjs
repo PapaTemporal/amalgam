@@ -20,7 +20,7 @@ import path from "node:path";
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "amalgam-cap-"));
 process.env.AMALGAM_DB = path.join(TMP, "memory.db");
 
-const { readTranscript, logTurns, savePending, listPending, countPending,
+const { readTranscript, logTurns, savePending, listPending, countPending, worthCapturing,
         acceptPending, rejectPending, supersede, proposeFacts, redact, pruneRaw, forgetRaw,
         captureEnabled } = await import("../lib/capture.mjs");
 const { open, close } = await import("../lib/db.mjs");
@@ -65,7 +65,7 @@ const after = open().prepare(`SELECT count(*) AS n FROM l0_log`).get().n;
 check("turns land in the raw layer", after - before === 3, `${before} -> ${after} rows`);
 
 // --- proposals are not memories --------------------------------------------
-savePending([
+await savePending([
   { kind: "constraint", content: "Build must stay offline: no package downloads at run time.", context: "eval" },
   { kind: "fact", content: `Dependency vendored under ${path.join(TMP, "definitely-not-here")}.`, context: "eval" },
 ], "session-1");
@@ -197,6 +197,50 @@ if (!modelInstalled()) {
   check("a session distils into candidate facts",
     Array.isArray(proposals) && proposals.every((p) => kinds.includes(p.kind) && p.content.length > 15),
     proposals.length ? proposals.map((p) => `${p.kind}: ${p.content.slice(0, 70)}`).join(" | ") : "(nothing durable found — allowed)");
+}
+
+// --- the same fact, proposed twice -----------------------------------------
+// Observed here rather than imagined: two sessions a day apart proposed the
+// same four facts in different words, and every one had to be rejected by
+// hand. That is the review effort this exists to save.
+{
+  const before = countPending();
+  const again = await savePending([
+    { kind: "constraint", content: "Build must stay offline: no package downloads at run time.", context: "eval" },
+  ], "session-2");
+  check("a proposal already waiting is not queued twice",
+    again.skipped === 1 && countPending() === before,
+    `${again.saved} saved, ${again.skipped} skipped`);
+
+  // Restating something already accepted is worse than noise: it invites the
+  // same claim being stored twice, after which recall returns both.
+  const known = open().prepare(`SELECT content FROM l1_facts LIMIT 1`).get();
+  if (known) {
+    const dup = await savePending([{ kind: "fact", content: known.content, context: "eval" }], "session-3");
+    check("nor is one restating a fact already accepted",
+      dup.skipped === 1, `${dup.saved} saved, ${dup.skipped} skipped`);
+  }
+
+  const fresh = await savePending([
+    { kind: "decision", content: "Sessions are listed by project so a running one is never unreachable.", context: "eval" },
+  ], "session-4");
+  check("but something genuinely new still gets through",
+    fresh.saved === 1, `${fresh.saved} saved, ${fresh.skipped} skipped`);
+}
+
+// --- a session that decided nothing proposes nothing -------------------------
+// Capture runs after every session, including two-turn ones where somebody
+// asked what a function returns. One such session produced five confident
+// little facts about a demo fixture, each costing a decision to reject.
+{
+  const oneExchange = [{ role: "user", text: "what does findAll return" },
+                       { role: "assistant", text: "the PRODUCTS array" }];
+  check("a session with one exchange is not worth capturing",
+    worthCapturing(oneExchange) === false, `${oneExchange.length} turn(s)`);
+
+  const real = Array.from({ length: 12 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", text: `turn ${i}` }));
+  check("a session that went somewhere is",
+    worthCapturing(real) === true, `${real.length} turn(s)`);
 }
 
 console.log(`\n${failed ? `${failed} check(s) failed` : "all checks passed"}${skipped ? `, ${skipped} skipped` : ""}`);

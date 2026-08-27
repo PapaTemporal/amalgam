@@ -10,12 +10,25 @@
  *
  * Usage (normally invoked by the hook): node distil.mjs <transcript> <session>
  */
-import { readTranscript, proposeFacts, savePending } from "../lib/capture.mjs";
+import { readTranscript, proposeFacts, savePending, worthCapturing } from "../lib/capture.mjs";
 
 const [transcript, sessionId = "unknown"] = process.argv.slice(2);
 
 try {
   const turns = readTranscript(transcript);
+  // A session that asked one question did not decide anything durable, and
+  // every proposal it makes costs somebody a decision to reject.
+  if (!worthCapturing(turns)) process.exit(0);
+
   const proposals = await proposeFacts(turns);
-  if (proposals.length) savePending(proposals, sessionId);
+  if (proposals.length) {
+    // Compared by meaning where the model is installed: the repeats seen in
+    // practice were the same fact reworded, not copied.
+    let vectors = {};
+    try {
+      const { embed, similarity, embeddingsInstalled } = await import("../lib/embed.mjs");
+      if (embeddingsInstalled()) vectors = { embed, similarity };
+    } catch { /* text comparison is enough */ }
+    await savePending(proposals, sessionId, vectors);
+  }
 } catch { /* silent: nobody is watching this process */ }
