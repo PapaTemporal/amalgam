@@ -231,22 +231,53 @@ Everything else lives on the machine rather than in the repository:
 | The embedding model and the local model | `amalgam install --with-embeddings --with-model` | reported |
 | The interactive graph's drawing library | `amalgam vendor-graph` — one 686 KB copy, then it never needs the network | reported |
 | A code graph and its diagram, per repository | `amalgam graph --label`, or **Rebuild** in the interface | reported |
-| **Which projects you have** | add them again — **Add a project**, or `amalgam ui` and point it at the folder | |
-| **What memory knows** | see below | |
-| **What a rebuild costs here** | one `amalgam graph` per repository | reported |
-| **Which model runs which task** | off by default; turn it on again in **Setup** | |
+| **Which projects you have** | carried by `amalgam transfer`, or add them again | |
+| **What memory knows** | `amalgam transfer export` here, `import` there | |
+| **What a rebuild costs here** | `amalgam update --build` | reported |
+| **Which model runs which task** | carried by `amalgam transfer`, or turn it on in **Setup** | |
 
 The rows marked *reported* are the ones `amalgam update` checks for when it
-finishes: it prints only what is actually missing, with the command that fixes
-it, and a machine with nothing outstanding says so in one line.
+finishes. It fixes what it can without being asked — the graph's drawing
+library is a 686 KB download that behaves identically afterwards, so it just
+does it — and for the rest it prints the single command that would close them:
 
-**Memory does not travel.** Facts, scenarios, your persona and the review queue
-all live in one SQLite file at `~/.amalgam/data/memory.db`, and a second
-machine starts empty. There is no sync and no export command — copying that
-one file across is the whole operation, and it is safe to do while nothing is
-running. Worth knowing before you do: a fact naming a path that exists only on
-the first machine will be flagged as stale on the second, which is the check
-working rather than a problem to fix.
+```
+Most of that is one command:  amalgam update --with-embeddings --build
+```
+
+The line is consent, not cost: fetching 2.5 GB or spending four minutes
+rebuilding a graph is your machine's time, and that gets a flag rather than a
+surprise. A machine with nothing outstanding says so in one line.
+
+**Memory travels in a bundle.** Facts, scenarios, your persona, the review
+queue, your project list and your routing settings live on the machine, not in
+the repository. On the machine you are leaving:
+
+```bash
+amalgam transfer export ~/amalgam-bundle
+```
+
+Copy the folder over, and on the other machine:
+
+```bash
+amalgam transfer import ~/amalgam-bundle
+```
+
+An empty machine takes it whole, including the supersede history that records
+which corrections replaced what. A machine that already has facts of its own
+**merges** instead — importing never deletes what was already there — skipping
+anything it already knows, and saying so. The review queue and the raw log do
+not merge, only live facts, and it tells you that rather than dropping them
+quietly.
+
+The bundle is small on purpose. The code index shares that SQLite file, and on
+the machine this was written on it is 97,918 symbols and 206,151 edges with
+their vectors — 341 MB of something entirely derived from repositories that
+are not on the other machine anyway. It stays behind, along with this machine's
+own savings measurements, leaving 848 KB to carry.
+
+A fact naming a path that exists only on the first machine will be flagged as
+stale on the second. That is the check working, not a problem to fix.
 
 **Automatic refresh stays asleep until you build once.** How long a rebuild
 takes is recorded per machine, because machines differ — so a repository set

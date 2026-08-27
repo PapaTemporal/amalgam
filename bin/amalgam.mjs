@@ -985,7 +985,106 @@ async function cmdUpdate(args) {
   }
   console.log(`\nUpdate complete — now at ${pkgVersion()}${pkgCommit() ? ` (${pkgCommit()})` : ""}.`);
   console.log("Restart any open agent session to pick up new skills, hooks, and MCP tools.");
-  await reportMachineGaps();
+
+  await closeWhatItCan(args);
+}
+
+/**
+ * Fix what an update is allowed to fix, and be specific about the rest.
+ *
+ * An update used to print a list of everything the machine still needed and
+ * leave every item to be typed out by hand. Some of that list is genuinely
+ * nobody else's business — signing into an agent cannot be done from here —
+ * but some of it is a small download that the update is already online for.
+ *
+ * The line between them is not cost, it is consent. Closing a 686 KB gap that
+ * behaves identically afterwards needs no permission. Fetching 2.5 GB, or
+ * spending four minutes rebuilding a graph, is the machine's time being spent
+ * on somebody's behalf, and that gets a flag rather than a surprise.
+ */
+async function closeWhatItCan(args = []) {
+  const { machineGaps, renderGaps } = await import("../lib/readiness.mjs");
+  let gaps = machineGaps();
+
+  for (const gap of gaps.filter((g) => g.auto)) {
+    console.log(`\n${gap.what} — fixing that now (${gap.fix})`);
+    try {
+      if (gap.id === "vendor") await cmdVendorGraph();
+    } catch (e) {
+      console.log(`  could not: ${e.message}`);
+    }
+  }
+
+  // Graphs, only when asked for, because this is the expensive one.
+  if (args.includes("--build")) {
+    const repos = gaps.find((g) => g.id === "repos")?.repos ?? [];
+    for (const r of repos) {
+      console.log(`\n=== ${r.name}`);
+      if (buildOneGraph(r.path, { label: true })) await indexOneGraph(r.path);
+    }
+  }
+
+  gaps = machineGaps();
+  console.log("");
+  console.log(renderGaps(gaps));
+
+  // Name the exact command, rather than leaving four of them to be assembled.
+  const flags = [...new Set(gaps.map((g) => g.flag).filter(Boolean))];
+  if (flags.length) {
+    console.log(`\nMost of that is one command:  amalgam update ${flags.join(" ")}`);
+  }
+}
+
+// ============================================================ transfer
+/**
+ * Carry the portable half of a machine to another one.
+ *
+ * The gap `update` cannot close: it moves code, and memory is a file on the
+ * machine being left behind. Everything a person accumulated travels; anything
+ * the new machine must learn for itself, notably how long its own rebuilds
+ * take, deliberately does not.
+ */
+async function cmdTransfer(args) {
+  const [sub, target] = args;
+  const { exportBundle, importFrom } = await import("../lib/transfer.mjs");
+
+  if (sub === "export") {
+    if (!target) return console.error("usage: amalgam transfer export <folder>");
+    const carried = await exportBundle(target);
+    if (!carried.length) return console.log("Nothing to carry — this machine has no memory or settings yet.");
+    console.log(`Bundle written to ${path.resolve(target)}\n`);
+    for (const c of carried) {
+      const freed = c.freed ? `  (${(c.freed / 1048576).toFixed(0)} MB of code index left behind)` : "";
+      console.log(`  ${(c.bytes / 1024).toFixed(0).padStart(6)} KB  ${c.file.padEnd(24)} ${c.what}${freed}`);
+    }
+    console.log(`
+Copy the folder to the other machine, then there:  amalgam transfer import <folder>
+
+Build timings are not in it, on purpose: how long a rebuild takes is a fact
+about a machine. The other machine learns its own with one 'amalgam update --build'.`);
+    return;
+  }
+
+  if (sub === "import") {
+    if (!target) return console.error("usage: amalgam transfer import <folder> [--replace]");
+    let vectors = {};
+    try {
+      const { embed, similarity, embeddingsInstalled } = await import("../lib/embed.mjs");
+      if (embeddingsInstalled()) vectors = { embed, similarity };
+    } catch { /* text comparison is enough */ }
+
+    const r = await importFrom(target, { replace: args.includes("--replace"), ...vectors });
+    if (r.error) { console.error(r.error); process.exitCode = 1; return; }
+    console.log(`Imported from ${path.resolve(target)}\n`);
+    for (const line of r.done) console.log(`  ${line}`);
+    console.log(`
+Next:  amalgam update --build   — so this machine learns what its own rebuilds cost.`);
+    return;
+  }
+
+  console.log(`usage:
+  amalgam transfer export <folder>            what this machine accumulated
+  amalgam transfer import <folder> [--replace]  bring it in on another one`);
 }
 
 // ================================================================ shim
@@ -1928,6 +2027,7 @@ switch (cmd) {
   case "vendor-graph": await cmdVendorGraph(); break;
   case "diagram": await cmdDiagram(rest); break;
   case "refresh": await cmdRefresh(rest); break;
+  case "transfer": await cmdTransfer(rest); break;
   default:
     // Distinguish "you typed a command I don't know" from "I received nothing
     // at all". The second usually means a shell wrapper ate the arguments,
