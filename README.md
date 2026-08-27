@@ -39,16 +39,17 @@ what each one is actually worth. Everything structural works with neither.
 
 | Instead of | You get | Nothing installed | Embeddings (~220 MB) | Both (~2.7 GB) |
 |---|---|---|---|---|
-| Pasting a test run into the chat | The exit code and the failing lines, byte for byte | **27,644 → 552 chars** | same | same |
+| Pasting a test run into the chat | The exit code and the failing lines, byte for byte | **30,382 → 571 chars** | same | same |
 | Grepping for what a diff affects | The symbols it touched and everything calling them | **96% smaller** | same | same |
-| Reading the files around a function | The symbols that bear on the task, their callers, their current source | **97% smaller** | same size | same size |
+| Reading the files around a function | The symbols that bear on the task, their callers, their current source | **98% smaller** | same size | same size |
 | Finding code by the words the code itself uses | The right symbol first | **10 of 12** | **11 of 12** | 11 of 12 |
 | Finding code by intent, sharing no word with the answer | The right symbol in the top five | **0 of 12** | 3 of 12 | **4 of 12** |
-| …and in the top three | Less to read before you find it | 0 of 12 | 3 of 12 | **4 of 12** |
+| …and in the top three | Less to read before you find it | 0 of 12 | 3 of 12 | **3 of 12** |
+| Choosing which model runs a task | Sized locally first, with the reason shown | — | — | **8 of 9, none too weak** |
 | Recalling what you decided months ago | The facts that bear on it | by keyword | **by meaning** | by meaning |
 | Reading a long log to summarise it | A digest, made locally | — | — | **91% smaller** |
 | Opening a graph of an unfamiliar codebase | Neighbourhoods with names, not numbers | numbered | numbered | **named** |
-| Ending a session | Durable facts proposed for review | — | — | **automatic** |
+| Ending a session | Durable facts proposed for review — not repeats, and not from a session that decided nothing | — | — | **automatic** |
 
 **Nothing installed** is not a crippled mode. The three reductions at the top
 are structural — they come from sending symbols instead of files, and an exit
@@ -70,12 +71,19 @@ all, and most of the rest share one generic term.
 It is the difference between searching by name and searching by description. It
 does the same for memory, which falls back to keyword search without it.
 
-**The local model is a convenience, not a retrieval upgrade.** It moves answers
-up the list rather than finding more of them — top-five is unchanged at four of
-twelve, top-three goes from three to four — and on vocabulary questions it is
-very slightly worse than leaving it out. What it genuinely adds is elsewhere:
-digest, naming the neighbourhoods in a graph, and proposing facts at the end of
-a session. If disk is tight, skip this one.
+**The local model is barely a retrieval upgrade.** It moves answers up the list
+rather than finding more of them — top-five goes from three of twelve to four —
+and on vocabulary questions it is very slightly worse than leaving it out. What
+it genuinely adds is elsewhere: digest, naming the neighbourhoods in a graph,
+proposing facts at the end of a session, and **sizing a task before it runs**.
+
+That last one is the reason to install it. Given a task, it says how hard the
+task is and therefore which model should answer it — a rename does not need
+what a redesign needs. Measured against tasks labelled by hand, 8 of 9 land
+where a careful person would put them and **none** land on a model too weak for
+the work, which is the direction that would actually cost you something. It is
+off by default, shown with its reason before every run, and one click overrides
+it; see **[model routing](docs/models.md)**.
 
 ### What it was measured against
 
@@ -83,7 +91,7 @@ Two codebases, because a saving measured on a small one proves very little.
 
 | | | |
 |---|---|---|
-| **amalgam** | 853 symbols, 1,891 edges, JavaScript | retrieval accuracy, check output, blast radius |
+| **amalgam** | 897 symbols, 2,002 edges, JavaScript | retrieval accuracy, check output, blast radius |
 | **MuseScore** | 95,826 symbols, 203,910 edges, C++ | packet size at scale |
 
 Retrieval accuracy is measured on amalgam only, and that is a limitation worth
@@ -143,7 +151,9 @@ question asked as *saveMxl* or *writing musicxml* needs no model at all.
 Measured on 2026-08-27 with `amalgam stats`, `bench/code-search.mjs` — which
 prints every configuration over both kinds of question in one run — and
 `bench/packet-size.mjs`, which reproduces the worked examples above against
-whatever the tree currently holds. A measured claim is a claim about a moment, exactly like a code graph: an
+whatever the tree currently holds. The routing figure comes from
+`tests/router-eval.mjs`, which scores wrong-downward separately from
+wrong-upward because those mistakes do not cost the same. A measured claim is a claim about a moment, exactly like a code graph: an
 earlier version of this table said ten of twelve, which was true when written
 and stopped being true as the repository grew by a hundred and eighty symbols.
 Re-run both and you will get today's numbers rather than these.
@@ -152,12 +162,19 @@ Re-run both and you will get today's numbers rather than these.
 packet knows the files it replaced, a digest knows what it consumed. Recall
 claims nothing, because measuring it would mean running the alternative.
 
-## Six ideas it is built on
+## Seven ideas it is built on
 
 **Evidence, not files.** The code graph decides *which* lines matter; the
 working tree supplies *what they say*. A symbol that moved is found by name, a
 deleted one is reported missing, and nothing is ever quoted from a stale index.
 A graph that has fallen behind costs precision, never correctness.
+
+**And it does not stay behind.** A session opens by asking what changed while
+nobody was looking — a pull, a branch switch, another machine — and names the
+files the index has not seen rather than quietly answering from them. It ends
+by rebuilding what fell behind, on an idle machine where nobody is waiting,
+within a budget learned from what that repository actually cost last time. Both
+halves report what they did rather than what they meant to.
 
 **Memory that corrects itself.** A fact replaced by a later one leaves recall
 instead of competing with its own correction. A fact naming a path that no
