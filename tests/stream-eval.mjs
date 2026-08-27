@@ -213,6 +213,39 @@ console.log("stream reclamation eval  (real repos in a temp dir)\n");
   check("but its build output is not", !fs.existsSync(path.join(s.path, "build")));
 }
 
+// --- 10. a worktree is not a repository somebody added ----------------------
+// A stream lands beside the repository it came from. When that repository is a
+// service inside a workspace, the worktree lands inside the workspace too, and
+// it looks exactly like one more checkout. Counted as a service it would
+// contribute its parent's symbols a second time and run its checks again.
+{
+  const ws = path.join(TMP, "workspace");
+  fs.mkdirSync(ws, { recursive: true });
+
+  const svc = path.join(ws, "catalog");
+  fs.mkdirSync(svc, { recursive: true });
+  git(svc, ["init", "-q", "-b", "main"]);
+  git(svc, ["config", "user.email", "eval@local"]);
+  git(svc, ["config", "user.name", "eval"]);
+  fs.writeFileSync(path.join(svc, "app.js"), "export const a = 1;" + String.fromCharCode(10));
+  git(svc, ["add", "-A"]);
+  git(svc, ["commit", "-qm", "base"]);
+
+  const { services, isWorkspace } = await import("../lib/workspace.mjs");
+  check("a folder of repositories is a workspace", isWorkspace(ws));
+  check("with one service in it", services(ws).map((x) => x.name).join() === "catalog");
+
+  // Where `amalgam stream new` puts it: beside the repository, which for a
+  // service means inside the workspace.
+  git(svc, ["worktree", "add", "-q", "-b", "stream/try", path.join(ws, "catalog-try")]);
+  check("the worktree is on disk and looks like a checkout",
+    fs.existsSync(path.join(ws, "catalog-try", "app.js")));
+
+  const after = services(ws).map((x) => x.name);
+  check("but it is not counted as a second service",
+    after.join() === "catalog", after.join(", ") || "(none)");
+}
+
 console.log(`\n${failed ? `${failed} check(s) failed` : "all checks passed"}`);
 try { fs.rmSync(TMP, { recursive: true, force: true }); } catch {}
 process.exitCode = failed ? 1 : 0;

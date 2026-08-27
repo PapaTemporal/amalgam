@@ -269,6 +269,48 @@ If no agent CLI is on PATH there is still the same composed text to copy into
 whatever session you already use. That is exactly how BMAD works today, and it
 is never worse than what you have now.
 
+### Sessions, and more than one of them
+
+The agent runs in amalgam, not in the page. Navigating away has never stopped
+one — the transcript is replayed in full the moment a page reconnects — but
+the only way back used to be a URL you happened to keep, which left a live
+session spending tokens with nothing able to reach it.
+
+So every session a project has is listed under **Start work**, running or
+finished, with where it is working and a way to stop it:
+
+![Two sessions, one of them in a work stream](images/sessions.png)
+
+Click one to watch it; **Close** puts it away without stopping it. Starting
+another while one runs is ordinary — nothing is serialised — and each keeps
+its own context, permissions and half-finished work between messages, because
+the child process stays alive rather than being restarted per turn.
+
+Sessions live for as long as amalgam is running. Stopping the interface ends
+them, which is the one thing worth knowing before closing a terminal.
+
+### Working somewhere else
+
+**working in** chooses where the next session runs: the project itself, or a
+**work stream** — a git worktree of one repository, on its own branch, checked
+out beside it.
+
+That is the answer to running two agents at once on the same code. Two
+sessions editing one working tree is not parallelism, it is a merge conflict
+being written twice; two worktrees are genuinely independent, and **Check
+collisions** compares them before anything merges.
+
+**new stream…** makes one: pick the repository, name it, and the branch
+`stream/<name>` and its folder appear beside the repo. Nothing is ever removed
+without being asked — see [the tools reference](tools.md#parallel-work) for how
+they are reclaimed. Streams created here and streams created with `amalgam stream new`
+are the same thing, made by the same code.
+
+A worktree is not a service, even though it sits next to one and looks like a
+checkout. It is excluded from a project's services deliberately: counted as one
+it would contribute its parent's symbols a second time and run its checks
+again.
+
 ### Asking which workflow fits
 
 BMAD already answers "what should I run for this?" — that is what

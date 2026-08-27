@@ -75,6 +75,78 @@ import RemoveProject from "$lib/RemoveProject.svelte";
   let starting = $state(false);
   let startError = $state(null);
 
+  /**
+   * Every session this project has, not just the one on screen.
+   *
+   * The agent runs in the server, so navigating away never stopped one — but
+   * the only way back was a URL you happened to keep, which made a live
+   * session that is still spending tokens unreachable. Sessions are listed
+   * because they exist, whether or not anything is looking at them.
+   */
+  let sessions = $state([]);
+  const refreshSessions = () =>
+    get("/sessions", { key }).then((r) => (sessions = r.sessions)).catch(() => {});
+  $effect(() => {
+    if (!key) return;
+    refreshSessions();
+    // Cheap and small; a running session changes state without this page
+    // being the thing that changed it.
+    const t = setInterval(refreshSessions, 4000);
+    return () => clearInterval(t);
+  });
+
+  const running = $derived(sessions.filter((s) => s.state === "running"));
+
+  /** Attach to one that is already going. */
+  function attach(s) {
+    sessionId = s.id;
+    sessionTitle = s.title;
+    const url = new URL(window.location.href);
+    url.searchParams.set("session", s.id);
+    history.replaceState({}, "", url);
+  }
+
+  async function stopSession(s) {
+    try { await post("/session/stop", { id: s.id }); } catch { /* it may have just ended */ }
+    refreshSessions();
+  }
+
+  /**
+   * Where the next session runs.
+   *
+   * A work stream is a worktree of one repository on its own branch, which is
+   * the whole point of having them: two agents editing the same files is not
+   * parallelism, it is a merge conflict being written twice. Null means the
+   * project itself.
+   */
+  let where = $state(null);
+  const places = $derived([
+    { label: data?.project?.name ?? "this project", path: null, note: "the project itself" },
+    ...(data?.streams ?? []).map((st) => ({
+      label: st.name, path: st.path, note: `worktree of ${st.of} on ${st.branch}`, stream: true,
+    })),
+  ]);
+  const place = $derived(places.find((x) => x.path === where) ?? places[0]);
+
+  // A stream that has just been made is where you meant to work.
+  let creating = $state(false);
+  let streamName = $state("");
+  let streamOf = $state("");
+  let streamError = $state(null);
+
+  async function makeStream() {
+    const name = streamName.trim();
+    if (!name) return;
+    streamError = null;
+    try {
+      const out = await post("/stream/new", { repo: streamOf || data.project.path, name });
+      creating = false;
+      streamName = "";
+      await load();
+      where = out.stream.path;
+    } catch (e) { streamError = e.message; }
+  }
+
   $effect(() => { if (!agent) get("/agent").then((a) => (agent = a)).catch(() => {}); });
 
   // graphify's own interactive graph, if it has been built. Served rather than
@@ -124,9 +196,10 @@ import RemoveProject from "$lib/RemoveProject.svelte";
     starting = true;
     startError = null;
     try {
-      const out = await post("/session/start", { cwd: p.path, prompt, title, permissionMode });
+      const out = await post("/session/start", { cwd: where ?? p.path, prompt, title, permissionMode });
       sessionTitle = title ?? "Session";
       sessionId = out.id;
+      refreshSessions();
       const url = new URL(window.location.href);
       url.searchParams.set("session", out.id);
       history.replaceState({}, "", url);
@@ -275,11 +348,50 @@ import RemoveProject from "$lib/RemoveProject.svelte";
       </div>
     {/if}
 
+    {#if agent?.cli && (places.length > 1 || !p.viewingService)}
+      <div class="where">
+        <span class="tiny faint">working in</span>
+        {#each places as x}
+          <button class="chip" class:on={place === x} title={x.note}
+                  onclick={() => (where = x.path)}>{x.label}</button>
+        {/each}
+        {#if !p.viewingService}
+          <button class="linky tiny" onclick={() => { creating = true; streamOf = p.services?.[0]?.path ?? p.path; }}>
+            new stream…
+          </button>
+        {/if}
+      </div>
+      {#if place?.stream}
+        <p class="tiny faint" style="margin:.15rem 0 0">
+          Its own worktree and branch, so this runs beside your working tree rather than in it.
+        </p>
+      {/if}
+    {/if}
+
     <div style="margin-top:.7rem">
       <StartWork projectKey={key} onstart={startWith} disabled={starting || !agent?.cli} />
     </div>
 
     {#if startError}<p class="tiny" style="color:var(--bad);margin-top:.5rem">{startError}</p>{/if}
+
+    {#if sessions.length}
+      <div class="sessions">
+        <span class="tiny faint">
+          {running.length} running{sessions.length > running.length ? `, ${sessions.length - running.length} finished` : ""}
+        </span>
+        {#each sessions as s}
+          <span class="sess" class:on={s.id === sessionId}>
+            <button class="linky" onclick={() => attach(s)}>
+              <span class="dot" class:live={s.state === "running"}></span>
+              {s.title}{#if s.where}<span class="tiny faint">&nbsp;· {s.where}</span>{/if}
+            </button>
+            {#if s.state === "running"}
+              <button class="linky tiny faint" title="stop this session" onclick={() => stopSession(s)}>stop</button>
+            {/if}
+          </span>
+        {/each}
+      </div>
+    {/if}
 
     {#if sessionId}
       <div class="flow">
@@ -585,6 +697,36 @@ import RemoveProject from "$lib/RemoveProject.svelte";
   <p class="faint">reading project…</p>
 {/if}
 
+<Modal open={creating} title="New work stream" onclose={() => { creating = false; streamError = null; }}>
+  <p class="tiny muted">
+    A worktree of one repository on its own branch, checked out beside it. Work here runs
+    against its own copy of the files, so a second session cannot collide with what you are
+    doing in your working tree.
+  </p>
+
+  {#if data?.project?.services?.length}
+    <label class="tiny faint" for="stream-of">of which repository</label>
+    <select id="stream-of" bind:value={streamOf}>
+      {#each data.project.services as sv}<option value={sv.path}>{sv.name}</option>{/each}
+    </select>
+  {/if}
+
+  <label class="tiny faint" for="stream-name" style="display:block;margin-top:.6rem">called</label>
+  <input id="stream-name" type="text" bind:value={streamName} placeholder="faster-search"
+         onkeydown={(e) => e.key === "Enter" && makeStream()} />
+  <p class="tiny faint">
+    Becomes the branch <span class="mono">stream/{streamName || "…"}</span> and a folder beside
+    the repository. Nothing is removed until you say so.
+  </p>
+
+  {#if streamError}<p class="tiny" style="color:var(--bad)">{streamError}</p>{/if}
+
+  <div class="row" style="justify-content:flex-end;margin-top:.8rem">
+    <button class="ghost" onclick={() => { creating = false; streamError = null; }}>Cancel</button>
+    <button class="primary" disabled={!streamName.trim()} onclick={makeStream}>Create it</button>
+  </div>
+</Modal>
+
 <Modal open={!!detaching} title={detaching ? `Remove “${detaching.name}” from ${p?.name ?? "this project"}?` : ""}
        onclose={() => { detaching = null; detachDelete = false; }}>
   {#if detaching}
@@ -650,6 +792,16 @@ import RemoveProject from "$lib/RemoveProject.svelte";
   .linkish { background: none; border: none; padding: 0; cursor: pointer; color: var(--accent);
              font: inherit; }
   .linkish:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+  .where { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; margin-top: .7rem; }
+  .sessions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+              margin-top: .8rem; padding-top: .7rem; border-top: 1px solid var(--line); }
+  .sess { display: inline-flex; align-items: center; gap: .35rem; padding: .1rem .4rem;
+          border-radius: 6px; }
+  .sess.on { background: var(--panel-2); }
+  .dot { display: inline-block; width: .45rem; height: .45rem; border-radius: 50%;
+         background: var(--ink-faint); margin-right: .25rem; }
+  .dot.live { background: var(--good); }
 
   .flow { margin-top: .9rem; border-top: 1px solid var(--line); padding-top: .9rem; }
   .bad-edge { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }

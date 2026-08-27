@@ -42,7 +42,7 @@ import { findSpecs, parseSprintStatus, assess, verify as verifyStories,
 // real repositories; this file only prints what they decide.
 import { git, readStreams, writeStreams, streamKey, inspectStream, classify,
          buildDirs, dirSize, human, BUILD_DIR_RE, plan as planGc, apply as applyGc,
-         STREAMS_DB } from "../lib/streams.mjs";
+         createStream, STREAMS_DB } from "../lib/streams.mjs";
 import { importGraph, indexStatus } from "../lib/graphdb.mjs";
 import { listPending, countPending, acceptPending, rejectPending, supersede,
          pruneRaw, forgetRaw, RAW_DAYS, RAW_MAX_ROWS } from "../lib/capture.mjs";
@@ -1218,23 +1218,17 @@ function cmdStream(args) {
       requireRepo();
       const name = rest[0];
       if (!name || name.startsWith("--")) { console.error("usage: amalgam stream new <name> [--repo <path>] [--base <branch>] [--purpose \"...\"]"); process.exit(1); }
-      const base = opt("--base", "main");
-      const branch = `stream/${name}`;
-      const wt = path.resolve(repo, "..", `${path.basename(repo)}-${name}`);
-      if (fs.existsSync(wt)) { console.error(`Path already exists: ${wt}`); process.exit(1); }
-      const r = git(repo, ["worktree", "add", "-b", branch, wt, base]);
-      if (!r.ok) { console.error(r.err || "git worktree add failed"); process.exit(1); }
-      db.streams[streamKey(repo, name)] = {
-        name, repo, path: wt, branch, base,
-        purpose: opt("--purpose", ""),
-        created: new Date().toISOString(),
-        evaluated: false, evaluatedAt: null,
-        pinned: flag("--pin"),
-      };
-      writeStreams(db);
+      // Created by the same function the interface calls, so a stream started
+      // from a terminal and one started from a button are the same thing.
+      const made = createStream({
+        repo, name, base: opt("--base", "main"),
+        purpose: opt("--purpose", ""), pin: flag("--pin"),
+      });
+      if (made.error) { console.error(made.error); process.exit(1); }
+      const st = made.stream;
       console.log(`Stream '${name}' ready.
-  worktree : ${wt}
-  branch   : ${branch} (from ${base})
+  worktree : ${st.path}
+  branch   : ${st.branch} (from ${st.base})
 Work there in its own session. Tag memories with context "${path.basename(repo)}/${name}".
 When you have judged the result:  amalgam stream done ${name} --repo ${repo}`);
       break;
