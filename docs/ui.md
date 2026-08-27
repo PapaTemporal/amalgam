@@ -486,6 +486,20 @@ What survives between sessions, filterable, with stale facts marked. If a
 finished session proposed anything, it is at the top waiting for review —
 nothing was written automatically.
 
+**Reviewing what is waiting.** A finished session proposes facts; they wait
+here until you keep or discard them, one at a time or all at once. Keeping one
+checks the paths it names and reports anything it may replace — and that
+report is a question, not an action: a similarity score cannot tell a
+correction from two facts that happen to share words, so **Retire the old one**
+is a button rather than something that happens on its own.
+
+This used to be a line of text telling you to open a terminal, which is where
+two dozen proposals had quietly accumulated. `amalgam memory accept <id>` still
+works and does exactly the same thing.
+
+A fact you asked for during a session never appears here. Telling the agent
+something is worth keeping writes it straight to long-term memory — the queue
+holds only what a session inferred on its own.
 ## Working on the interface itself
 
 Only relevant if you are changing it. The source is SvelteKit (Svelte 5 runes)
