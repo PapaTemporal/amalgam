@@ -214,6 +214,26 @@ Grouped by the hats a small team wears — get work done, look into something,
 start something new, check the work, ship it, think it through — because on a
 team of one all of those are the same afternoon.
 
+**And by who is sitting down.** A hat is what you are doing this hour; a role
+is what you are doing this job. Say which one you are and the menu reorders:
+your work arrives as the first tab, and the specialists you would actually
+talk to are named under it.
+
+![Start work seen as a product manager](images/role.png)
+
+It orders; it does not restrict. Every hat is still there, one click away,
+and **show everything equally** puts it back — because the person who most
+needs a task outside their role is the one who has just been handed it. The
+choice is remembered per person rather than per project, since it does not
+change when you switch codebases, and `?you=Architect` on a project link
+opens somebody else's view of the same page.
+
+BMAD ships five agents with names and characters — Mary the analyst, John the
+product manager, Winston the architect, Sally the designer, Amelia the
+developer — and they are a different kind of thing from a workflow: you talk
+to them rather than run them. So they sit beside the tasks rather than in the
+list, and each role surfaces the two it works with most.
+
 Picking a task **prefills**; it does not send. What runs is a line you can
 read and edit before pressing Run, so the interface and a terminal do the same
 thing and you can always see which. The card says what each one runs for

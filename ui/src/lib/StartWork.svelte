@@ -37,7 +37,43 @@
 
   const groups = $derived(data?.tasks ?? []);
   const hasHelp = $derived(!!data?.help);
-  const current = $derived(groups[hat] ?? null);
+
+  /**
+   * Who is sitting down.
+   *
+   * A hat is what you are doing this hour; a role is what you are doing this
+   * job, so it is remembered per person rather than per project and it orders
+   * the menu instead of cutting it down. Everything stays reachable — the
+   * person who most needs a task outside their role is the one who has just
+   * been handed it.
+   */
+  const ROLE_KEY = "amalgam.role";
+  let role = $state(null);
+  $effect(() => {
+    if (role !== null || typeof localStorage === "undefined") return;
+    // A link may say who is reading — "here is what this looks like from
+    // where I sit" — and if it does, it wins and then sticks, because being
+    // shown a view you cannot get back to is worse than not being shown it.
+    const said = page.url.searchParams.get("you");
+    if (said) { role = said; try { localStorage.setItem(ROLE_KEY, said); } catch { /* private mode */ } return; }
+    role = localStorage.getItem(ROLE_KEY) ?? "";
+  });
+
+  const allRoles = $derived(data?.roles ?? []);
+  const mine = $derived(allRoles.find((r) => r.label === role) ?? null);
+
+  function beRole(label) {
+    role = role === label ? "" : label;
+    hat = 0;
+    picked = null;
+    remember(null);
+    try { localStorage.setItem(ROLE_KEY, role); } catch { /* private mode */ }
+  }
+
+  // The role's own tasks ride in front of the hats as one more tab, so it is
+  // an ordering and not a mode: every hat is still one click away.
+  const tabs = $derived(mine ? [{ hat: mine.label, blurb: mine.note, items: mine.items, role: true }, ...groups] : groups);
+  const current = $derived(tabs[hat] ?? null);
 
   /** "Fix a bug" -> "fix-a-bug". Stable enough to link to, readable in a URL. */
   const slug = (label) =>
@@ -67,7 +103,7 @@
     linked = true;
     const want = page.url.searchParams.get("task");
     if (!want) return;
-    for (const [i, g] of groups.entries()) {
+    for (const [i, g] of tabs.entries()) {
       const item = g.items.find((it) => slug(it.label) === want);
       if (item) { hat = i; pick(item, { link: false }); return; }
     }
@@ -105,8 +141,20 @@
 </script>
 
 {#if groups.length}
+  {#if allRoles.length}
+    <div class="roles">
+      <span class="tiny faint">you are</span>
+      {#each allRoles as r}
+        <button class="chip" class:on={role === r.label} title={r.note} onclick={() => beRole(r.label)}>{r.label}</button>
+      {/each}
+      {#if role}
+        <button class="linky tiny" onclick={() => beRole(role)}>show everything equally</button>
+      {/if}
+    </div>
+  {/if}
+
   <div class="hats">
-    {#each groups as g, i}
+    {#each tabs as g, i}
       <button class:on={hat === i} onclick={() => { hat = i; picked = null; remember(null); }}>{g.hat}</button>
     {/each}
   </div>
@@ -121,6 +169,17 @@
         </button>
       {/each}
     </div>
+
+    {#if current.role && mine?.talkTo?.length}
+      <div class="specialists">
+        <span class="tiny faint">or think it through with</span>
+        {#each mine.talkTo as t}
+          <button class="chip" class:on={picked?.label === t.label} title={t.note} onclick={() => pick(t)}>
+            {t.label.replace(/^Talk to the /, "")}
+          </button>
+        {/each}
+      </div>
+    {/if}
   {/if}
 
   {#if picked}
@@ -213,6 +272,14 @@
   .compose { display: flex; flex-direction: column; gap: .5rem; margin-top: .9rem;
              border-top: 1px solid var(--line); padding-top: .8rem; }
   .compose textarea { width: 100%; resize: vertical; font: inherit; font-size: .85rem; }
+
+  .roles { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; margin-bottom: .6rem; }
+  .specialists { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; margin-top: .7rem; }
+  .chip {
+    font-size: .78rem; padding: .2rem .55rem; border-radius: 999px;
+    border: 1px solid var(--line); background: transparent; color: var(--ink-dim);
+  }
+  .chip.on { border-color: var(--accent); color: var(--ink); }
 
   .foot { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
           margin-top: .9rem; border-top: 1px solid var(--line); padding-top: .7rem; }
