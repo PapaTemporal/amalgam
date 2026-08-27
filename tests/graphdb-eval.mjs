@@ -107,9 +107,16 @@ check("a symbol is findable by name",
 if (!withVectors) {
   skip("meaning finds what names do not", "no embedding model installed (amalgam install --with-embeddings)");
 } else {
-  // Not one word of this query appears in the symbol's name or signature. It
-  // only matches through the sentence written above the function.
-  const q = "guard against empty passwords before requests are routed";
+  // Not one word of this query appears anywhere in the symbol — not in its
+  // name, its signature, its path, or the sentence above it. That is the point:
+  // it is the case words cannot reach however carefully they are matched.
+  //
+  // The query used to be "…before requests are routed", which shares "routed"
+  // with the doc comment's "route". That went unnoticed while the lexical path
+  // compared identifiers only; once it learned to read doc comments and to trim
+  // word endings it found the symbol too, and the claim below stopped being
+  // true. The claim was wrong, not the search — see lib/lexical.mjs.
+  const q = "stop bad logins from getting through";
   const [qv] = (await embed(q, { query: true })) ?? [];
   const hits = searchSymbols(REPO, q, { vec: qv, limit: 2, similarity, fromBlob });
   check("meaning finds what names do not",

@@ -42,6 +42,28 @@ const CASES = [
   ["what turns a plain question into database search terms", "ftsQuery"],
 ];
 
+// The other half of the question, and the one the no-model path can actually
+// answer: somebody who knows roughly what the code calls things but not the
+// exact identifier. Nobody types `symbolsInRanges`; they type "symbols in a
+// range". These are not easier questions, they are a different KIND — the
+// vocabulary is shared, so words are enough in principle, and what is being
+// measured is whether the matching survives plurals, tenses and the fact that
+// an identifier is several words with the spaces taken out.
+const VOCAB = [
+  ["importing graphs", "importGraph"],
+  ["slicing a symbol", "sliceSymbol"],
+  ["which symbols get selected", "selectSymbols"],
+  ["fts queries", "ftsQuery"],
+  ["symbols in ranges", "symbolsInRanges"],
+  ["adding events", "addEvent"],
+  ["verifying edges", "verifyEdge"],
+  ["candidates for superseding", "supersedeCandidates"],
+  ["files that are stale", "staleFiles"],
+  ["planning a refresh", "refreshPlan"],
+  ["verifying facts", "verifyFact"],
+  ["resuming work", "resume"],
+];
+
 if (!isIndexed(REPO)) {
   console.error(`${REPO} is not indexed. Run: amalgam graph`);
   process.exit(1);
@@ -54,43 +76,63 @@ const rankOf = (hits, want) => {
   return i < 0 ? Infinity : i + 1;
 };
 
-async function run(label, search) {
+async function run(label, search, cases = CASES) {
   const ranks = [];
-  for (const [q, want] of CASES) ranks.push(rankOf(await search(q), want));
+  for (const [q, want] of cases) ranks.push(rankOf(await search(q), want));
   const at = (n) => ranks.filter((r) => r <= n).length;
   const mrr = ranks.reduce((s, r) => s + (r === Infinity ? 0 : 1 / r), 0) / ranks.length;
-  console.log(`${label.padEnd(32)} hit@1 ${at(1)}/${CASES.length}   hit@3 ${at(3)}/${CASES.length}   hit@5 ${at(5)}/${CASES.length}   MRR ${mrr.toFixed(3)}`);
+  console.log(`${label.padEnd(32)} hit@1 ${at(1)}/${cases.length}   hit@3 ${at(3)}/${cases.length}   hit@5 ${at(5)}/${cases.length}   MRR ${mrr.toFixed(3)}`);
   return ranks;
 }
 
-console.log(`repo ${REPO}\n${CASES.length} questions, each phrased as intent rather than by name\neach tier is a configuration: no downloads, the embedding model alone, or both\n`);
+console.log(`repo ${REPO}
+${CASES.length} questions of each kind, against the same ${CASES.length} symbols
+each tier is a configuration: no downloads, the embedding model alone, or both
+`);
 
-const nameOnly = await run("names only        (no models)", async (q) => findSymbols(g, q, 5));
+/** Every configuration this machine can offer, run over one set of questions. */
+async function tiers(title, cases) {
+  console.log(title);
+  const out = {};
+  out.names = await run("  no downloads", async (q) => findSymbols(g, q, 5), cases);
 
-let semantic = null, expanded = null, reranked = null;
-if (!withVectors) {
-  console.log("semantic                   skipped — no embedding model installed");
-} else {
-  semantic = await run("meaning + names   (embeddings)", async (q) => {
+  if (!withVectors) {
+    console.log("  embeddings                skipped — no embedding model installed");
+    console.log("");
+    return out;
+  }
+
+  out.semantic = await run("  + embeddings", async (q) => {
     const [qv] = (await embed(q, { query: true })) ?? [];
     return searchSymbols(REPO, q, { vec: qv, limit: 5, similarity, fromBlob, expand: false });
-  });
-  expanded = await run("+ graph neighbours (embeddings)", async (q) => {
+  }, cases);
+
+  out.expanded = await run("  + graph neighbours", async (q) => {
     const [qv] = (await embed(q, { query: true })) ?? [];
     return searchSymbols(REPO, q, { vec: qv, limit: 5, similarity, fromBlob, expand: true });
-  });
+  }, cases);
+
   if (!modelInstalled()) {
-    console.log("+ local rerank             skipped — no local model installed");
+    console.log("  + local rerank            skipped — no local model installed");
   } else {
-    const t0 = Date.now();
-    reranked = await run("+ local rerank    (both models)", async (q) => {
+    out.reranked = await run("  + local rerank", async (q) => {
       const [qv] = (await embed(q, { query: true })) ?? [];
       const wide = searchSymbols(REPO, q, { vec: qv, limit: 20, similarity, fromBlob, expand: true });
       return (await rerankSymbols(q, wide)) ?? wide;
-    });
-    console.log(`${"".padEnd(26)} ${((Date.now() - t0) / CASES.length / 1000).toFixed(1)}s per question (local model)`);
+    }, cases);
   }
+  console.log("");
+  return out;
 }
+
+// Reported separately, never averaged. They are not harder and easier versions
+// of one question — they are two different questions, and a number covering
+// both describes neither.
+const intent = await tiers("asked by intent, sharing no vocabulary with the answer:", CASES);
+const vocab = await tiers("asked in the code's own vocabulary:", VOCAB);
+
+const nameOnly = intent.names;
+const semantic = intent.semantic, expanded = intent.expanded, reranked = intent.reranked;
 
 if (semantic) {
   console.log("\nper question (rank of the wanted symbol, - = not in top 5):");
