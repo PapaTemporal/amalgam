@@ -133,6 +133,34 @@ without going to look for a log:
 
 ![A project set up](images/setup-project-done.png)
 
+#### Keeping graphs current
+
+The one thing amalgam does without being asked, so it is the one thing that
+should not be invisible. When a session ends, a graph that has fallen behind
+its code is rebuilt: the machine is idle, nobody is waiting, and the session
+that benefits is the next one. Only the index is rebuilt — drawing and
+clustering are what make a rebuild slow, and neither changes what an agent can
+find.
+
+The card names every repository, what its last build actually cost, and what
+would happen to it when a session ends. Three rules keep it from eating the
+machine:
+
+- **A budget.** More than 90 seconds and it is not something to start behind
+  somebody's back.
+- **A cooldown.** Three sessions in an hour must not mean three rebuilds of
+  the same repository.
+- **A measurement first.** A repository amalgam has never timed here is never
+  started on a guess. Size predicts build cost badly — what costs time is how
+  much of a tree the extractor refuses to cache — so it waits for one
+  deliberate build to learn from, and says so rather than quietly skipping.
+
+**Turn it off** and the machine does nothing unbidden; the graph then goes
+stale, which costs precision and never correctness, and the interface keeps
+saying how far behind it is. `AMALGAM_AUTO_REFRESH` still wins where it is
+set, so a machine that must never start work on its own can be held that way
+from outside the interface.
+
 ### A project
 
 ![A project dashboard](images/project.png)
