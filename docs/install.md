@@ -219,19 +219,42 @@ fetches the latest each time.
 
 ### What an update does not bring with it
 
-Pulling code updates the code. Some things live on the machine rather than in
-the repository, and a second machine needs them separately:
+`amalgam update` pulls, re-deploys and re-wires. That is the whole story for
+**code** — and it assumes a clone is already there to pull into. A machine that
+has never had amalgam on it starts from the install above instead.
 
-| | |
-|---|---|
-| The agent CLI, and being signed into it | `npm install -g @anthropic-ai/claude-code`, then `claude` once |
-| The interactive graph's drawing library | `amalgam vendor-graph` — one 686 KB copy, then it never needs the network |
-| A code graph and its diagram, per repository | `amalgam graph --label`, or **Rebuild** in the interface |
-| The embedding model and the local model | `amalgam install --with-embeddings --with-model` |
+Everything else lives on the machine rather than in the repository:
 
-`amalgam update` checks for all of these when it finishes and prints only what
-is actually missing, with the command that fixes it. A machine with nothing
-outstanding says so in one line.
+| | | |
+|---|---|---|
+| The agent CLI, and being signed into it | `npm install -g @anthropic-ai/claude-code`, then `claude` once | reported |
+| The embedding model and the local model | `amalgam install --with-embeddings --with-model` | reported |
+| The interactive graph's drawing library | `amalgam vendor-graph` — one 686 KB copy, then it never needs the network | reported |
+| A code graph and its diagram, per repository | `amalgam graph --label`, or **Rebuild** in the interface | reported |
+| **Which projects you have** | add them again — **Add a project**, or `amalgam ui` and point it at the folder | |
+| **What memory knows** | see below | |
+| **What a rebuild costs here** | one `amalgam graph` per repository | reported |
+| **Which model runs which task** | off by default; turn it on again in **Setup** | |
+
+The rows marked *reported* are the ones `amalgam update` checks for when it
+finishes: it prints only what is actually missing, with the command that fixes
+it, and a machine with nothing outstanding says so in one line.
+
+**Memory does not travel.** Facts, scenarios, your persona and the review queue
+all live in one SQLite file at `~/.amalgam/data/memory.db`, and a second
+machine starts empty. There is no sync and no export command — copying that
+one file across is the whole operation, and it is safe to do while nothing is
+running. Worth knowing before you do: a fact naming a path that exists only on
+the first machine will be flagged as stale on the second, which is the check
+working rather than a problem to fix.
+
+**Automatic refresh stays asleep until you build once.** How long a rebuild
+takes is recorded per machine, because machines differ — so a repository set
+up somewhere else arrives with a graph and no idea what refreshing it would
+cost, and the policy will not start work whose cost it does not know. One
+`amalgam graph` per repository teaches it, and from then on that repository
+keeps itself current. Until then the update report lists it as *"never built on
+this machine, so it will never refresh itself"*.
 
 One case is worth calling out: a repository whose graph was built by a version
 with the indexing bugs in it has a `graphify-out/graph.json` on disk and
