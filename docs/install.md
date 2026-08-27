@@ -228,6 +228,7 @@ Everything else lives on the machine rather than in the repository:
 | | | |
 |---|---|---|
 | The agent CLI, and being signed into it | `npm install -g @anthropic-ai/claude-code`, then `claude` once | reported |
+| — unless you use Copilot | nothing: `amalgam wire --copilot` already put these tools in it | reported |
 | The embedding model and the local model | `amalgam install --with-embeddings --with-model` | reported |
 | The interactive graph's drawing library | `amalgam vendor-graph` — one 686 KB copy, then it never needs the network | reported |
 | A code graph and its diagram, per repository | `amalgam graph --label`, or **Rebuild** in the interface | reported |

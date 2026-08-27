@@ -169,6 +169,32 @@ await on(B, async ({ transfer }) => {
   check("a folder that is not a bundle is refused", !!r.error, r.error);
 });
 
+// --- what a Copilot user is told --------------------------------------------
+// amalgam runs sessions by speaking Claude Code's streaming protocol, so
+// Copilot cannot be driven — but `amalgam wire --copilot` puts every tool here
+// inside it. Telling somebody looking at an installed Copilot that they have
+// no agent CLI is wrong twice: they have one, and they already have the tools.
+{
+  const { machineGaps } = await import(`../lib/readiness.mjs?t=${Date.now()}`);
+  const agentGap = (o) => machineGaps(o).find((g) => g.id === "agent");
+
+  const neither = agentGap({ claude: null, copilot: null });
+  check("with no agent at all, it says so plainly",
+    /No agent CLI/.test(neither.what), neither.what);
+
+  const copilotOnly = agentGap({ claude: null, copilot: "/somewhere/copilot" });
+  check("with Copilot installed, it does not claim there is no agent",
+    !/No agent CLI/.test(copilotOnly.what), copilotOnly.what);
+  check("and says the tools still work where they already are",
+    /wire --copilot/.test(copilotOnly.why),
+    "the gap is Start work, not the whole product");
+  check("and that installing Claude Code is optional for them",
+    /can stop here/.test(copilotOnly.note ?? ""), copilotOnly.note);
+
+  check("with Claude Code present there is no gap at all",
+    !agentGap({ claude: "/somewhere/claude", copilot: null }));
+}
+
 console.log(`\n${failed ? `${failed} check(s) failed` : "all checks passed"}`);
 try { fs.rmSync(TMP, { recursive: true, force: true }); } catch {}
 process.exitCode = failed ? 1 : 0;
