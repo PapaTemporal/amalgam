@@ -2,10 +2,17 @@
 /**
  * SessionStart hook — makes the offload stack automatic.
  *
- * Two jobs, both silent-failing so a session can never be blocked:
+ * Three jobs, all silent-failing so a session can never be blocked:
  *   1. Report anything worth reclaiming. Nothing needs starting: memory is a
  *      SQLite file, and the optional model loads on first use.
- *   2. Emit the offload directives on stdout, which Claude Code injects as
+ *   2. Reconcile with reality. A session ends by writing down what it learned
+ *      and rebuilding what fell behind, which covers everything that session
+ *      did and nothing that happened between sessions — a pull, a branch
+ *      switch, another machine. So the opening of a session asks whether the
+ *      graph is still at the commit it was built from and whether memory
+ *      still names paths that exist. See lib/reconcile.mjs; it reports rather
+ *      than repairs, because repair belongs where nobody is waiting.
+ *   3. Emit the offload directives on stdout, which Claude Code injects as
  *      session context. This is deterministic, unlike skill description
  *      matching, and it reaches every workflow — including BMAD's — without
  *      modifying any of their skill files.
@@ -57,6 +64,17 @@ try {
     if (n > 0) reclaimHint = `\n- ${n} finished work stream(s) can be reclaimed: run \`amalgam stream gc\` (plan) then \`--yes\`.`;
   } catch {}
 
+  // What changed while nobody was looking. Costs two commit ids compared when
+  // everything is current, which is nearly always, and only pays for the file
+  // list when there is actually something to name.
+  let driftHint = "";
+  try {
+    const { codeChanged, memoryDrifted, describe } = await import("../lib/reconcile.mjs");
+    const cwd = process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
+    const said = describe({ code: codeChanged(cwd), memory: await memoryDrifted() });
+    if (said.length) driftHint = "\n" + said.join("\n");
+  } catch {}
+
   const lines = [
     "[amalgam] Local offload stack is wired into this session via the MCP server \"amalgam\".",
     "Spend local compute, not context tokens. Services start themselves on first use; never substitute cloud services.",
@@ -73,7 +91,7 @@ try {
   }
   // Static directives first, then everything that varies by session — see the
   // note at the top of this file about why the order is load-bearing.
-  process.stdout.write(lines.join("\n") + pendingHint + reclaimHint + "\n");
+  process.stdout.write(lines.join("\n") + pendingHint + reclaimHint + driftHint + "\n");
 } catch {
   // never block session start
 }

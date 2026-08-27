@@ -422,6 +422,59 @@ only the digest crosses into the agent's context — measured at 91% smaller on
 a 58 KB source file (14,515 → 1,292 tokens), with the file itself never
 entering context. Reach for it before reading a long log, spec, or dump.
 
+## Staying current
+
+A session **ends** by writing down what it learned and, if a graph has fallen
+behind its code, rebuilding it. That covers everything the session itself did.
+It covers nothing that happened *between* sessions — a pull, a branch switch,
+work done on another machine, an editor open in another window — and those land
+on exactly the state an agent trusts most: an index that answers confidently
+and a memory that states facts flatly. A stale index does not give a slower
+answer. It gives a wrong one in the same tone as a right one.
+
+So a session **opens** by reconciling rather than assuming. Two questions, both
+asked of reality rather than of a cache:
+
+| | Question | Answered by |
+|---|---|---|
+| the code | is each graph still at the commit it was built from? | the commit id inside the graph, against `HEAD` |
+| the memory | do the paths its facts name still exist? | `lib/verify.mjs` |
+
+**It reports; it does not repair.** Rebuilding at session start would either
+make somebody wait for their first prompt or change the index underneath a
+session already using it. Neither is worth it, because saying *"the graph has
+not seen these four files — read them directly"* costs nothing and degrades
+precisely: the graph selects which lines, the working tree supplies what they
+say. Repair belongs at the end, where nobody is waiting.
+
+**The common case is free.** Almost always nothing has changed, and that answer
+comes from comparing two commit ids — with no git process at all, since `HEAD`
+is a file and is read as one, falling back to asking git properly whenever the
+layout is anything but ordinary. Measured here: 2 ms when current, against
+about 650 ms only when a repository has actually moved and there is something
+worth naming.
+
+A repository more than forty commits behind is not enumerated. "Read these four
+hundred files directly" is not advice anybody can act on, so the advice becomes
+*rebuild* — and arriving at it does not cost a walk of every tree in between.
+
+Nothing is said when nothing changed. A notice printed every session stops
+being read by the third one.
+
+### Why the graph swap is one transaction
+
+Refreshing can overlap with a session that is working, which turns a
+theoretical hazard into a real one. Replacing a repository's index deletes its
+edges before inserting the new ones, and a reader arriving in that window sees
+symbols with no edges between them — not a stale answer but a confidently wrong
+one, which is the single failure this design is least willing to trade for
+speed. The structural swap is therefore one transaction.
+
+It stops before the embeddings deliberately: those await a model server, and a
+write transaction held across an await would block every other writer for as
+long as a large repository takes to embed. Vectors are an enhancement, not the
+index, and are written afterwards one batch at a time.
+
 ---
 
 Back to the [tool map](tools.md), or [why any of this exists](why.md).
