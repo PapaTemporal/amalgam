@@ -57,6 +57,32 @@ Opening a **service** from a project shows it in place rather than adding it to
 the list, since a service belongs to its project and looking at something
 should not change what you have chosen to track.
 
+**Adding one** is a wizard, and the same wizard whether or not the project
+exists yet, because the only difference is what the folder already contains.
+It starts by asking which folder: the chooser lists real directories from
+your machine and marks which are already git repositories or already have
+BMAD — no typing paths. A **new** project must land on an empty folder, or a
+name you type to create one, since dropping a workspace on top of an existing
+tree produces something nobody can reason about later:
+
+![Choosing a project folder](images/add-picker.png)
+
+Then it asks what is in it. Clone a repository you already have, or start an
+empty one and it runs `git init` for you — as many as the project needs:
+
+![Adding repositories to a project](images/add-services.png)
+
+**Set up this project** does the rest in one go: installs the planning
+workflows, wires amalgam in, builds a code graph for every repository, and
+works out the links between them. That is the whole definition of ready, so
+there is nothing left to run by hand afterwards.
+
+A step that fails stops the sequence, because the steps after it assume it
+worked, and its last lines of output are shown in place so you can see why
+without going to look for a log:
+
+![A project set up](images/add-done.png)
+
 ### Setup
 
 The first thing on the page is what this machine is still missing — and it is
@@ -106,32 +132,6 @@ just replaced.
 Everything on this page is an `amalgam` command shown as it runs. The first
 time still comes from a terminal — you need a clone before there is a UI to
 click — but from then on either works.
-
-**A project** is one wizard whether or not it exists yet, because the only
-difference is what the folder already contains. It starts by asking which
-folder: the chooser lists real directories from your machine and marks which
-are already git repositories or already have BMAD — no typing paths. A **new**
-project must land on an empty folder, or a name you type to create one, since
-dropping a workspace on top of an existing tree produces something nobody can
-reason about later:
-
-![Choosing a project folder](images/setup-picker.png)
-
-Then it asks what is in it. Clone a repository you already have, or start an
-empty one and it runs `git init` for you — as many as the project needs:
-
-![Adding repositories to a project](images/setup-services.png)
-
-**Set up this project** does the rest in one go: installs the planning
-workflows, wires amalgam in, builds a code graph for every repository, and
-works out the links between them. That is the whole definition of ready, so
-there is nothing left to run by hand afterwards.
-
-A step that fails stops the sequence, because the steps after it assume it
-worked, and its last lines of output are shown in place so you can see why
-without going to look for a log:
-
-![A project set up](images/setup-project-done.png)
 
 #### Keeping graphs current
 

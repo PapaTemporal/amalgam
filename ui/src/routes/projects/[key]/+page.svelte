@@ -753,7 +753,10 @@ import RemoveProject from "$lib/RemoveProject.svelte";
   {/if}
 </Modal>
 
-<Modal open={removing} title={`Remove “${p?.name ?? ""}”?`} onclose={() => (removing = false)}>
+<!-- Gated on the project having arrived: this dialog can be linked to directly,
+     and a link that opens `Remove ""?` over an empty page is worse than a link
+     that takes a moment. -->
+<Modal open={removing && !!p} title={`Remove “${p?.name ?? ""}”?`} onclose={() => (removing = false)}>
   {#if removing}
     <RemoveProject projectKey={key} name={p.name}
       ondone={() => (location.href = "/")} oncancel={() => (removing = false)} />

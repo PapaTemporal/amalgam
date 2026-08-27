@@ -69,16 +69,16 @@
     <div class="card empty">
       <p>No projects yet. Point amalgam at a codebase to begin.</p>
       <div class="row" style="justify-content:center">
-        <a class="btn primary" href="/setup/project">Add a project</a>
-        <a class="btn" href="/setup/project?new">Start something new</a>
+        <a class="btn primary" href="/projects/add">Add a project</a>
+        <a class="btn" href="/projects/add?new">Start something new</a>
       </div>
     </div>
   {:else}
     <div class="spread" style="margin-bottom:1rem">
       <span class="label">{state.projects.length} project(s)</span>
       <div class="row">
-        <a class="btn" href="/setup/project">Add a project</a>
-        <a class="btn" href="/setup/project?new">New project</a>
+        <a class="btn" href="/projects/add">Add a project</a>
+        <a class="btn" href="/projects/add?new">New project</a>
       </div>
     </div>
 

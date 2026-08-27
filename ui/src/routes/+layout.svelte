@@ -10,7 +10,12 @@
     { href: "/memory", label: "Memory" },
     { href: "/setup", label: "Setup" },
   ];
-  const on = (href) => href === "/" ? page.url.pathname === "/" : page.url.pathname.startsWith(href);
+  // "Projects" owns everything about projects, including adding one and
+  // opening one — the section a page belongs to is not always the folder its
+  // route happens to sit in.
+  const on = (href) => href === "/"
+    ? page.url.pathname === "/" || page.url.pathname.startsWith("/projects")
+    : page.url.pathname.startsWith(href);
 </script>
 
 <div class="shell">
