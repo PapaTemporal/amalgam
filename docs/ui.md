@@ -139,7 +139,8 @@ without going to look for a log:
 
 Everything about one codebase on one page.
 
-- **Start work** — four buttons, described below.
+- **Start work** — the tasks somebody actually sits down to do, described
+  below.
 - **Code graph** — symbols, edges, when it was last indexed, and buttons to
   rebuild, open the service map, explore the symbols, or open the **Diagram**.
   Rebuild does the whole job: extract, cluster, name the communities with the
@@ -228,6 +229,26 @@ through a planning workflow would be a worse answer. Those say so.
 Anything whose workflow is not installed is not offered, so a BMAD upgrade
 that renames or removes one leaves no dead button behind.
 
+![A task picked, composed, and not yet sent](images/flow.png)
+
+**Nothing runs until you press Run it.** A button that hides what it is about
+to ask an agent to do is a button nobody can review, so the composed text is on
+screen, editable, and the card names the workflow underneath it.
+
+Which task is picked lives in the URL — `?task=fix-a-bug` on a project link
+opens the page with that one already composed — so a prompt can be sent to
+somebody rather than described to them.
+
+What makes it worth pressing is what is already in it. The prompt arrives
+carrying the project path, whether a code graph exists, the project's real
+check command, your open work items, the stories that are not finished, and
+the facts memory already holds — so the session does not spend its first
+several exchanges rediscovering them.
+
+If no agent CLI is on PATH there is still the same composed text to copy into
+whatever session you already use. That is exactly how BMAD works today, and it
+is never worse than what you have now.
+
 ### Asking which workflow fits
 
 BMAD already answers "what should I run for this?" — that is what
@@ -248,42 +269,6 @@ the prompt straight to a session, so the step where you carry text between two
 windows the interface is already showing you does not need to happen. The file
 on disk is untouched and the clipboard still gets the text.
 
-### Start work
-
-Four buttons for the four shapes of work people actually begin:
-
-| Button | What it sets up |
-|---|---|
-| **New feature** | The full path: frame the problem, agree the shape, cut it into stories that each declare a check, build the first |
-| **Continue a story** | Pick up something already specified and implement it |
-| **Fix a bug** | Reproduce first, understand the blast radius, change as little as possible |
-| **Understand this code** | Survey an unfamiliar codebase before touching it |
-
-![A composed prompt, shown before it runs](images/flow.png)
-
-**Every button shows you the prompt before anything runs.** A button that hides
-what it is about to ask an agent to do is a button nobody can review, so the
-composed text is on screen, copyable, and yours to edit.
-
-Each flow is deep-linkable — `?flow=feature` on a project URL composes it
-immediately, so a prompt can be bookmarked or sent to somebody rather than
-described to them.
-
-What makes it worth pressing is what is already in it. The prompt arrives
-carrying the project path, whether a code graph exists, the project's real
-check command, your open work items, the stories that are not finished, and
-the facts memory already holds — so the session does not spend its first
-several exchanges rediscovering them.
-
-Then, depending on what your machine has:
-
-1. **An agent CLI is on PATH** — it can open a session with the prompt in
-   place.
-2. **No CLI** — copy the prompt into whatever session you already use.
-
-Both are fine. The second is exactly how BMAD works today, and it is never
-worse than what you have now.
-
 ### Map
 
 A code graph only knows connections written as symbols. When one component
@@ -299,6 +284,16 @@ The map infers those edges from evidence and draws the result:
 - **Services** — one box per repository, with the contracts between them as
   arrows. A single-repository project shows one box and a loop, which is the
   honest picture of a frontend calling its own backend.
+
+  Click a service and the map re-centres on it: what calls it on the left, the
+  service in the middle, what it calls on the right. The geometry carries the
+  direction, so nothing has to be read off an arrowhead. Services outside the
+  project appear too, dashed, named from how the calling code addresses them —
+  `${PAYMENTS_URL}` becomes **payments**, which is the only identity a
+  configured host leaves in the source. They are not clickable, because there
+  is nothing here to open. Each service view carries a **Diagram** link to that
+  repository's own interactive graph, and the focused service is in the URL
+  (`?service=catalog-api`) like everything else worth sending to somebody.
 - **Contracts** — every route paired with the code that calls it, each with the
   evidence behind it: a literal path meeting a literal route is strong, a
   wrapper call matched by suffix is weaker, and both say so.
@@ -318,21 +313,6 @@ Refresh it with **Rescan**, or `amalgam contracts` from a terminal. These edges
 are inferred, never mixed into the parsed `calls` edges, and re-verified against
 the source before being shown — a match whose literal has since moved is
 dropped rather than reported.
-
-### Map
-
-One box per repository, with the contracts between them as arrows. Click a
-service and the map re-centres on it: what calls it on the left, the service
-in the middle, what it calls on the right. The geometry carries the direction,
-so nothing has to be read off an arrowhead.
-
-Services outside the project appear too, dashed, named from how the calling
-code addresses them — `${PAYMENTS_URL}` becomes **payments**, which is the
-only identity a configured host leaves in the source. They are not clickable,
-because there is nothing here to open.
-
-Each service view carries a **Diagram** link to that repository's own
-interactive graph.
 
 ### Explore
 

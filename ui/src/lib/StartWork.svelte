@@ -1,5 +1,6 @@
 <script>
   import { get } from "$lib/api.js";
+  import { page } from "$app/state";
   import Modal from "$lib/Modal.svelte";
 
   /**
@@ -14,6 +15,11 @@
    * Picking one prefills. It does not send. What runs is a line you can read
    * and edit, because the whole point is that the interface and a terminal do
    * the same thing.
+   *
+   * Which task is picked lives in the URL, so a prompt can be sent to somebody
+   * rather than described to them: ?task=fix-a-bug opens this page with that
+   * one already composed. The name in the link is the label somebody would
+   * say out loud, not an internal id, because the link is read by people.
    */
   let { projectKey, onstart, disabled = false } = $props();
 
@@ -33,10 +39,39 @@
   const hasHelp = $derived(!!data?.help);
   const current = $derived(groups[hat] ?? null);
 
-  function pick(item) {
+  /** "Fix a bug" -> "fix-a-bug". Stable enough to link to, readable in a URL. */
+  const slug = (label) =>
+    String(label).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+  function pick(item, { link = true } = {}) {
     picked = item;
     text = item.template ? item.template.replace("{{input}}", "") : item.prefill;
+    if (link) remember(slug(item.label));
   }
+
+  /** Keep the address bar honest without adding a history entry per click. */
+  function remember(value) {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (value) url.searchParams.set("task", value);
+    else url.searchParams.delete("task");
+    history.replaceState({}, "", url);
+  }
+
+  // A link that names a task opens with it composed. Runs once the catalogue
+  // has arrived, since until then there is nothing to match against, and it
+  // does not re-link: the URL already says this.
+  let linked = $state(false);
+  $effect(() => {
+    if (linked || !groups.length) return;
+    linked = true;
+    const want = page.url.searchParams.get("task");
+    if (!want) return;
+    for (const [i, g] of groups.entries()) {
+      const item = g.items.find((it) => slug(it.label) === want);
+      if (item) { hat = i; pick(item, { link: false }); return; }
+    }
+  });
 
   function run() {
     const body = picked?.template
@@ -46,6 +81,7 @@
     onstart?.(body, picked?.label ?? "Session");
     picked = null;
     text = "";
+    remember(null);
   }
 
   async function askHelp() {
@@ -71,7 +107,7 @@
 {#if groups.length}
   <div class="hats">
     {#each groups as g, i}
-      <button class:on={hat === i} onclick={() => { hat = i; picked = null; }}>{g.hat}</button>
+      <button class:on={hat === i} onclick={() => { hat = i; picked = null; remember(null); }}>{g.hat}</button>
     {/each}
   </div>
 
@@ -106,7 +142,7 @@
           {#if picked.next} Usually followed by <em>{picked.next}</em>.{/if}
         </span>
         <div class="row">
-          <button class="ghost" onclick={() => (picked = null)}>Cancel</button>
+          <button class="ghost" onclick={() => { picked = null; remember(null); }}>Cancel</button>
           <button class="primary" onclick={run} disabled={disabled || !text.trim()}>Run it</button>
         </div>
       </div>

@@ -92,7 +92,7 @@ button.danger:hover { border-color: var(--bad); color: var(--bad); }
 .pill.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }
 .pill.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }
 
-input[type="text"], input[type="search"], select {
+input[type="text"], input[type="search"], textarea, select {
   font: inherit; font-size: .9rem; padding: .45rem .6rem; border-radius: 8px;
   border: 1px solid var(--line); background: var(--bg); color: var(--ink); width: 100%;
 }
