@@ -28,6 +28,7 @@ fs.mkdirSync(process.env.AMALGAM_HOME, { recursive: true });
 
 const { codeChanged, describe } = await import("../lib/reconcile.mjs");
 const { headCommit, graphIsCurrent, commitsBehind } = await import("../lib/freshness.mjs");
+const { importGraph } = await import("../lib/graphdb.mjs");
 
 let failed = 0;
 const check = (name, pass, detail) => {
@@ -58,6 +59,9 @@ const graphAt = (dir, sha) => {
   fs.mkdirSync(path.join(dir, "graphify-out"), { recursive: true });
   fs.writeFileSync(path.join(dir, "graphify-out", "graph.json"),
     JSON.stringify({ nodes: [], links: [], built_at_commit: sha }));
+  // The document is consumed during indexing now, and staleness reads the
+  // index — so a fixture has to index to describe a repository that has a graph.
+  importGraph(dir);
 };
 
 const commit = (dir, file, msg) => {

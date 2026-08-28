@@ -22,10 +22,14 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "amalgam-fresh-"));
+// Staleness is read from the index now, so this needs its own store rather than
+// the real one. Set before the modules load, since HOME is resolved on import.
+process.env.AMALGAM_DB = path.join(TMP, "memory.db");
+
 const { graphStaleness, staleFiles, projectStaleness, projectStaleFiles } =
   await import("../lib/freshness.mjs");
-
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "amalgam-fresh-"));
+const { importGraph } = await import("../lib/graphdb.mjs");
 
 let failed = 0;
 const check = (name, pass, detail) => {
@@ -70,6 +74,10 @@ const writeGraph = (dir, builtAtCommit = null) => {
   fs.mkdirSync(path.join(dir, "graphify-out"), { recursive: true });
   fs.writeFileSync(path.join(dir, "graphify-out", "graph.json"),
     JSON.stringify({ nodes: [], links: [], built_at_commit: builtAtCommit }));
+  // `amalgam graph` writes the document and imports it in one step, and the
+  // index is what staleness reads. A fixture that only wrote the document was
+  // describing a state that no longer occurs.
+  importGraph(dir);
 };
 
 // --- nothing to report before anything moves --------------------------------
