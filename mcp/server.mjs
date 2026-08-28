@@ -33,7 +33,7 @@ import { embed, similarity, toBlob, fromBlob, embeddingsInstalled } from "../lib
 import { verifyFact } from "../lib/verify.mjs";
 import { staleFiles, projectStaleFiles } from "../lib/freshness.mjs";
 import { createTask, addEvent, setState, listTasks, resume, renderResume } from "../lib/tasks.mjs";
-import { hasGraph, graphifySpec, graphifyArgs, findSymbols, sliceSymbol, callersOf, calleesOf,
+import { graphifySpec, graphifyArgs, findSymbols, sliceSymbol, callersOf, calleesOf,
          changedFiles, changedRanges, symbolsInRanges } from "../lib/graph.mjs";
 import { isIndexed, graphFromDb, searchSymbols } from "../lib/graphdb.mjs";
 import { graphFor as graphForAny, isWorkspace, searchWorkspace,
@@ -372,7 +372,7 @@ const TOOLS = [
   {
     name: "graph_query",
     description:
-      "Query a repo's local code knowledge graph (graphify, tree-sitter, no LLM) instead of grepping/reading files. mode 'explain' = one symbol's connections; 'path' = how two symbols connect; 'query' = scoped subgraph for a plain question; 'build' = (re)build the graph for a repo (slow on big repos — run once). Requires graph built in the repo (graphify-out/).",
+      "Query a repo's local code knowledge graph (graphify, tree-sitter, no LLM) instead of grepping/reading files. mode 'explain' = one symbol's connections; 'path' = how two symbols connect; 'query' = scoped subgraph for a plain question; 'build' = (re)build the graph for a repo (slow on big repos — run once). Requires a graph indexed for the repo (build with mode 'build' or `amalgam graph`).",
     inputSchema: {
       type: "object",
       properties: {
@@ -879,9 +879,7 @@ Record what happens with task_note, and save durable facts with memory_save_fact
       // failing emptily two lines down — is the difference between "build one"
       // and "you built one, it never reached the index".
       if (!isIndexed(repo) && !isWorkspace(repo)) {
-        throw new Error(hasGraph(repo)
-          ? `A graph was built in ${repo} but never indexed. Run 'amalgam graph' again to import it.`
-          : `No code graph in ${repo}. Build one with 'amalgam graph' (or graph_query mode=build).`);
+        throw new Error(`No code graph in ${repo}. Build one with 'amalgam graph' (or graph_query mode=build).`);
       }
       const g = graphFor(repo);
       if (!g) throw new Error(`No code graph in ${repo}. Build one with 'amalgam graph'.`);
@@ -915,9 +913,7 @@ Record what happens with task_note, and save durable facts with memory_save_fact
       const repo = args.repo;
       if (!fs.existsSync(repo)) throw new Error(`Repo not found: ${repo}`);
       if (!isIndexed(repo) && !isWorkspace(repo)) {
-        throw new Error(hasGraph(repo)
-          ? `A graph was built in ${repo} but never indexed. Run 'amalgam graph' again to import it.`
-          : `No code graph in ${repo}. Build one with 'amalgam graph'.`);
+        throw new Error(`No code graph in ${repo}. Build one with 'amalgam graph'.`);
       }
       const rev = args.rev ?? "HEAD";
       const g = graphFor(repo);

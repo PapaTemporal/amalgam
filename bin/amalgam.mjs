@@ -905,9 +905,10 @@ function clusterOneGraph(dir, { label = false } = {}) {
 
 /** How big the graph is, for deciding whether a browser should be asked to draw it. */
 function countNodes(dir) {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(dir, GRAPH_REL), "utf8")).nodes?.length ?? 0;
-  } catch { return 0; }
+  // From the index rather than the document: the document is transient now, and
+  // the index carries the count as a column instead of requiring a full parse
+  // of a file that can reach hundreds of megabytes on a large repository.
+  try { return indexStatus(dir)?.symbols ?? 0; } catch { return 0; }
 }
 
 /**
@@ -947,6 +948,21 @@ async function indexOneGraph(dir) {
       console.log(`  note: ${res.missingVectors} symbol(s) have no vector — ${res.embedError}.`);
       console.log(`        Search here falls back to names. Re-run once the model is available.`);
     }
+    // graph.json has now done its whole job: graphify wrote it, cluster-only
+    // drew the page from it, and importGraph has read it into the index. It is
+    // a build intermediate, not an artifact — leaving it behind is what let one
+    // dataset look like two, and left "a file exists" standing in for "the
+    // index can answer", which are not the same claim.
+    //
+    // Deleted only after a successful import, deliberately: if indexing failed,
+    // the file is the evidence of what it failed on.
+    try {
+      const doc = path.join(dir, GRAPH_REL);
+      if (fs.existsSync(doc)) {
+        fs.rmSync(doc);
+        console.log(`  graph.json consumed and removed — the index is the graph now`);
+      }
+    } catch { /* leaving it is harmless; nothing reads it */ }
     return true;
   } catch (e) {
     console.log(`  NOT INDEXED: ${e.message}`);
@@ -1344,7 +1360,7 @@ function findServices(root) {
       isGit,
       branch: isGit ? git(p, ["rev-parse", "--abbrev-ref", "HEAD"]).out : null,
       dirty: isGit ? git(p, ["status", "--porcelain"]).out.split("\n").filter(Boolean).length : 0,
-      graph: fs.existsSync(path.join(p, "graphify-out", "graph.json")),
+      graph: isIndexed(p),
     });
   }
   return out;
@@ -2093,8 +2109,13 @@ async function cmdDiagram(args) {
 
   let drawn = 0;
   for (const t of targets) {
+    // cluster-only reads graph.json, which `amalgam graph` consumes and
+    // removes once it is indexed. Redrawing is therefore rebuilding, and
+    // saying so beats failing inside graphify with a missing-file error.
     if (!fs.existsSync(path.join(t.path, GRAPH_REL))) {
-      console.log(`  ${t.name}: no graph yet — run \`amalgam graph\` first`);
+      console.log(`  ${t.name}: ${isIndexed(t.path)
+        ? "indexed, but the extract was consumed — run `amalgam graph` to redraw"
+        : "no graph yet — run `amalgam graph` first"}`);
       continue;
     }
     console.log(`\n=== ${t.name}`);

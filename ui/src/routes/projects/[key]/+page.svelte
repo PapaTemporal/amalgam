@@ -622,8 +622,6 @@ import RemoveProject from "$lib/RemoveProject.svelte";
               <td class="tiny muted">
                 {#if svc.branch}<span class="pill">{svc.branch}</span>{/if}
                 {#if svc.indexed}<span class="pill good">{svc.symbols.toLocaleString()} symbols</span>
-                {:else if svc.needsIndex}<span class="pill warn"
-                  title="graphify wrote a graph file for this service, but amalgam never read it into its index — and every count, search and context packet reads the index, not the file. That is why this service contributes no symbols. Rebuild to fix it.">not indexed — contributes nothing</span>
                 {:else}<span class="pill warn">no graph</span>{/if}
                 {#if svc.checks.length}<span class="pill">{svc.checks.join(", ")}</span>
                 {:else}<span class="pill warn">no checks</span>{/if}
@@ -661,13 +659,6 @@ import RemoveProject from "$lib/RemoveProject.svelte";
         </div>
       {/if}
 
-      {#if p.services.some((s) => s.needsIndex)}
-        <p class="tiny" style="margin:.75rem 0 0;color:var(--warn)">
-          A service marked <strong>not indexed</strong> has a graph file that amalgam never read
-          in. Counts, search and context all come from the index rather than the file, so those
-          services add nothing to the totals above until a rebuild succeeds.
-        </p>
-      {/if}
       <p class="tiny faint" style="margin:.75rem 0 0">
         Building the graph here builds one per service and the project totals them.
         Open a service to work inside it alone.
