@@ -137,6 +137,29 @@ const DOWNLOADS = [
     needsRuntime: true,
     approx: "~90 MB",
   },
+  // macOS, mirrored onto the release exactly like the models are, so
+  // `install --with-embeddings` completes here instead of fetching a 127 MB
+  // GGUF and leaving nothing able to open it.
+  //
+  // llama.cpp publishes no CPU-only build for macOS: the arm64 release always
+  // contains Metal, and `--list-devices` on it reports a usable GPU. Shipping
+  // it is a deliberate choice, and it is only safe because the servers are
+  // launched with CPU_ONLY (lib/services.mjs) — `--device none -ngl 0` — so
+  // the device is never offloaded to regardless of what the binary can do.
+  // Packaging cannot make that guarantee here; the launch flags can.
+  //
+  // Note the packaging difference from Windows: a .tar.gz whose contents sit
+  // inside one top-level llama-<tag>/ directory, hence stripComponents.
+  ...(process.platform === "darwin" ? [{
+    id: "llama.cpp (macOS build, pinned to CPU at launch)",
+    asset: `llama-macos-${process.arch === "arm64" ? "arm64" : "x64"}.tar.gz`,
+    archive: path.join(HOME, "downloads", `llama-macos-${process.arch === "arm64" ? "arm64" : "x64"}.tar.gz`),
+    extractTo: path.join(HOME, "runtime", "llama"),
+    stripComponents: 1,
+    check: path.join(HOME, "runtime", "llama", exe("llama-server")),
+    needsRuntime: true,
+    approx: "~11 MB",
+  }] : []),
   {
     id: "bge-small embedding model (semantic recall)",
     asset: EMBED_MODEL_FILE,
@@ -283,8 +306,17 @@ function download(d) {
   return false;
 }
 
-function extractZip(zip, dest, members = []) {
+function extractZip(zip, dest, members = [], stripComponents = 0) {
   fs.mkdirSync(dest, { recursive: true });
+  // The macOS runtime is a gzipped tarball wrapping everything in one
+  // directory. `unzip` cannot read it, and extracting without stripping that
+  // directory would put llama-server one level below where llamaServerPath()
+  // looks — installed, and invisible.
+  if (/\.tar\.gz$|\.tgz$/.test(zip)) {
+    const args = ["-xzf", path.resolve(zip), "-C", path.resolve(dest)];
+    if (stripComponents > 0) args.push(`--strip-components=${stripComponents}`);
+    return spawnSync("tar", [...args, ...members], { stdio: ["ignore", "ignore", "inherit"] }).status === 0;
+  }
   if (WIN) {
     // Use Windows' own bsdtar by absolute path: a Git Bash / MSYS "tar" on
     // PATH is GNU tar, which parses "C:\..." as a remote host. bsdtar also
@@ -321,11 +353,17 @@ function pgRunning() {
 
 // ---------------------------------------------------------------- commands
 async function cmdInstall(args) {
-  if (!WIN) {
-    console.log("Non-Windows: memory works as-is (SQLite is built into Node). For the");
-    console.log(`optional model, put a llama.cpp build under ${HOME}/runtime/llama and`);
-    console.log(`the GGUF model(s) under ${HOME}/models/.`);
-    console.log(manualHelp(DOWNLOADS.filter((d) => !d.winOnly)));
+  // Only say this where it is true. It used to print on every non-Windows
+  // machine, under a heading reading "Automatic download failed", before a
+  // single download had been attempted — and now that macOS has a runtime on
+  // the release, it would also be advising people to hand-place a binary the
+  // installer is about to fetch for them.
+  const runtimeAvailable = DOWNLOADS.some((d) => d.needsRuntime && !(d.winOnly && !WIN));
+  if (!runtimeAvailable) {
+    console.log(`No llama.cpp build is published for ${process.platform}-${process.arch}.`);
+    console.log(`Memory works without one. For the optional models, put a CPU llama.cpp`);
+    console.log(`build under ${path.join(HOME, "runtime", "llama")} and the GGUF file(s)`);
+    console.log(`under ${path.join(HOME, "models")}.\n`);
   }
   const cacheIdx = args.indexOf("--cache");
   const cache = cacheIdx >= 0 ? args[cacheIdx + 1] : null;
@@ -374,7 +412,7 @@ async function cmdInstall(args) {
     }
     if (d.extractTo) {
       console.log(`  extracting ${d.id} ...`);
-      if (!extractZip(d.archive, d.extractTo, d.extractMembers ?? [])) {
+      if (!extractZip(d.archive, d.extractTo, d.extractMembers ?? [], d.stripComponents ?? 0)) {
         console.error(`  extraction failed for ${d.archive}`);
         failed.push(d);
       }
