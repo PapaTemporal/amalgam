@@ -35,7 +35,6 @@ import { services as workspaceServices, isWorkspace } from "../lib/workspace.mjs
 import { rank as rankRisk, render as renderSurvey } from "../lib/survey.mjs";
 import { analyse as analyseCollisions, render as renderCollisions } from "../lib/collide.mjs";
 import { isIndexed, graphFromDb } from "../lib/graphdb.mjs";
-import { loadGraph as loadGraphJson } from "../lib/graph.mjs";
 import { findSpecs, parseSprintStatus, assess, verify as verifyStories,
          summarise, render as renderTrace } from "../lib/trace.mjs";
 // The reclamation rules live in lib/streams.mjs so they can be tested against
@@ -1937,11 +1936,11 @@ async function cmdSurvey(args) {
   console.log(renderSurvey(survey, { repo, gate }));
 }
 
-/** The graph for a repo from the index, falling back to the built document. */
+/** The graph for a repo. The index is the only source; see lib/workspace.mjs. */
 function graphForRepo(repo) {
   try {
-    if (isIndexed(repo)) { const g = graphFromDb(repo); if (g?.nodes.size) return g; }
-    return loadGraphJson(repo);
+    const g = graphFromDb(repo);
+    return g?.nodes?.size ? g : null;
   } catch { return null; }
 }
 

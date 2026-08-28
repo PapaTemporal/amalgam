@@ -30,6 +30,7 @@ const { contracts, saveContracts } = await import("../lib/contracts.mjs");
 const { overview, symbol, neighbourhood, shortestPath, impact, tree, withContracts } =
   await import("../lib/explore.mjs");
 const { graphFor } = await import("../lib/workspace.mjs");
+const { importGraph } = await import("../lib/graphdb.mjs");
 const { close } = await import("../lib/db.mjs");
 
 let failed = 0;
@@ -83,6 +84,11 @@ const graph = (dir, nodes, links) => {
     hyperedges: [], built_at_commit: null,
   };
   write(path.join(dir, "graphify-out", "graph.json"), JSON.stringify(doc));
+  // graph.json is graphify's output, not a source anything reads from: the
+  // index is. `amalgam graph` writes the document and imports it in one step,
+  // so a fixture that only wrote the document was exercising a path that no
+  // longer exists rather than the one callers take.
+  importGraph(path.join(TMP, dir));
 };
 
 // Each service is a repository; a workspace is a folder of them.

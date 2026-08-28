@@ -33,7 +33,7 @@ import { embed, similarity, toBlob, fromBlob, embeddingsInstalled } from "../lib
 import { verifyFact } from "../lib/verify.mjs";
 import { staleFiles, projectStaleFiles } from "../lib/freshness.mjs";
 import { createTask, addEvent, setState, listTasks, resume, renderResume } from "../lib/tasks.mjs";
-import { loadGraph, hasGraph, findSymbols, sliceSymbol, callersOf, calleesOf,
+import { hasGraph, findSymbols, sliceSymbol, callersOf, calleesOf,
          changedFiles, changedRanges, symbolsInRanges } from "../lib/graph.mjs";
 import { isIndexed, graphFromDb, searchSymbols } from "../lib/graphdb.mjs";
 import { graphFor as graphForAny, isWorkspace, searchWorkspace,
@@ -125,9 +125,7 @@ const git = (repo, args) => {
 };
 
 /**
- * The graph for a repo, from the index when it has been imported and from the
- * JSON document when it has not. Identical shape either way, so nothing
- * downstream needs to know which it got.
+ * The graph for a repo, read from the index and only from the index.
  */
 function graphFor(repo) {
   // A project is a workspace and its graph is the union of its services'.
@@ -876,7 +874,15 @@ Record what happens with task_note, and save durable facts with memory_save_fact
     case "code_context": {
       const repo = args.repo;
       if (!fs.existsSync(repo)) throw new Error(`Repo not found: ${repo}`);
-      if (!hasGraph(repo) && !isIndexed(repo) && !isWorkspace(repo)) throw new Error(`No code graph in ${repo}. Build one with 'amalgam graph' (or graph_query mode=build).`);
+      // A graph.json on disk is no longer proof of anything answerable: the index
+      // is what gets read. Saying so here — rather than passing the gate and
+      // failing emptily two lines down — is the difference between "build one"
+      // and "you built one, it never reached the index".
+      if (!isIndexed(repo) && !isWorkspace(repo)) {
+        throw new Error(hasGraph(repo)
+          ? `A graph was built in ${repo} but never indexed. Run 'amalgam graph' again to import it.`
+          : `No code graph in ${repo}. Build one with 'amalgam graph' (or graph_query mode=build).`);
+      }
       const g = graphFor(repo);
       if (!g) throw new Error(`No code graph in ${repo}. Build one with 'amalgam graph'.`);
       const found = await selectSymbols(repo, g, args.task, Math.min(Math.max(args.max_symbols ?? 5, 1), 15),
@@ -908,7 +914,11 @@ Record what happens with task_note, and save durable facts with memory_save_fact
     case "graph_impact": {
       const repo = args.repo;
       if (!fs.existsSync(repo)) throw new Error(`Repo not found: ${repo}`);
-      if (!hasGraph(repo) && !isIndexed(repo) && !isWorkspace(repo)) throw new Error(`No code graph in ${repo}. Build one with 'amalgam graph'.`);
+      if (!isIndexed(repo) && !isWorkspace(repo)) {
+        throw new Error(hasGraph(repo)
+          ? `A graph was built in ${repo} but never indexed. Run 'amalgam graph' again to import it.`
+          : `No code graph in ${repo}. Build one with 'amalgam graph'.`);
+      }
       const rev = args.rev ?? "HEAD";
       const g = graphFor(repo);
       if (!g) throw new Error(`No code graph in ${repo}. Build one with 'amalgam graph'.`);
