@@ -26,8 +26,6 @@ import { ensureLlama, llamaHealthy, modelInstalled, LLAMA_PORT,
 import { open as openDb } from "../lib/db.mjs";
 import { verifyFact } from "../lib/verify.mjs";
 import { graphStaleness as freshnessOf } from "../lib/freshness.mjs";
-import { recordBuild, dueForRefresh, refreshPlan, autoRefreshEnabled,
-         recordRun, lastRun, BUDGET_MS, COOLDOWN_MS } from "../lib/refresh.mjs";
 import { check as runCheck, render as renderCheck } from "../lib/checks.mjs";
 import { runGate, renderGate, detectChecks } from "../lib/gates.mjs";
 import { contracts as findContracts, saveContracts, render as renderContracts } from "../lib/contracts.mjs";
@@ -811,10 +809,12 @@ function cmdWire(args) {
 
 // ================================================================ graph
 // graphify builds a code graph that answers "what calls this / how do these
-// connect" for a fraction of the tokens reading files costs. The graph is a
-// snapshot, so it goes stale as code lands — hence staleness reporting below
-// and a refresh command that always passes --code-only (the docs/media pass
-// would call a cloud backend, which this stack forbids).
+// connect" for a fraction of the tokens reading files costs.
+//
+// The graph is a snapshot and goes stale as code lands. That is reported, not
+// scheduled around: `code_context` reads current source from disk and names the
+// files the index predates, so a stale graph costs precision and never
+// correctness. Rebuilding is something a person asks for.
 
 const GRAPH_REL = path.join("graphify-out", "graph.json");
 
@@ -843,9 +843,6 @@ function buildOneGraph(dir, { sql = false, label = false, quiet = false } = {}) 
   }
   console.log(`  graph -> ${path.join(dir, GRAPH_REL)}`);
   if (!quiet) clusterOneGraph(dir, { label });
-  // What it actually cost here, so the automatic refresh can decide from a
-  // measurement rather than from a guess about size.
-  recordBuild(dir, Date.now() - startedAt);
   return true;
 }
 
@@ -2018,69 +2015,6 @@ async function reportMachineGaps() {
   } catch { /* an older deployed copy without it */ }
 }
 
-// ================================================================= refresh
-/**
- * Bring stale graphs up to date, within a budget.
- *
- * Run by hand, or by the session-end hook when nobody is waiting. Only
- * extraction and indexing: clustering and drawing are what make a rebuild
- * expensive and neither affects what an agent can find, so they stay a
- * deliberate act.
- */
-async function cmdRefresh(args) {
-  const { opts } = parseArgs(args);
-
-  if (opts.plan !== undefined || opts["dry-run"] !== undefined) {
-    const plan = refreshPlan();
-    if (!plan.length) return console.log("No projects registered.");
-    console.log(`budget ${Math.round(BUDGET_MS / 1000)}s per repository, then ` +
-                `${Math.round(COOLDOWN_MS / 60000)} minutes before the same one again` +
-                `${autoRefreshEnabled() ? "" : "   (automatic refresh is off)"}`);
-
-    const last = lastRun();
-    if (!last) {
-      console.log("it has never actually run on this machine\n");
-    } else if (last.error) {
-      console.log(`last run ${last.at} FAILED: ${last.error}\n`);
-    } else {
-      const what = last.rebuilt.length ? `rebuilt ${last.rebuilt.join(", ")}` : "nothing was due";
-      console.log(`last run ${last.at} — ${what}\n`);
-    }
-    for (const p of plan) {
-      const cost = p.lastBuildMs == null ? "never timed" : `${Math.round(p.lastBuildMs / 1000)}s last time`;
-      console.log(`  ${p.refresh ? "WOULD" : "skip "}  ${p.name.padEnd(18)} ${cost.padEnd(16)} ${p.reason}`);
-    }
-    return;
-  }
-
-  const due = opts.force !== undefined
-    ? refreshPlan().filter((p) => p.commits > 0)
-    : dueForRefresh();
-
-  // Whatever happens next, it happened. This runs detached from a hook with
-  // its output going nowhere, so the only way anybody finds out it is broken
-  // is if it writes down that it ran.
-  const done = [];
-  let failure = null;
-  try {
-    for (const t of due) {
-      console.log(`\n=== ${t.name} — ${t.reason}`);
-      // quiet: no clustering, no page. Accuracy lives in the index.
-      if (buildOneGraph(t.path, { quiet: true })) {
-        await indexOneGraph(t.path);
-        done.push(t.name);
-      }
-    }
-  } catch (e) {
-    failure = e.message ?? String(e);
-    throw e;
-  } finally {
-    recordRun({ considered: due.length, rebuilt: done, error: failure });
-  }
-
-  if (!due.length) console.log("Nothing to refresh.");
-}
-
 // ================================================================= diagram
 /**
  * Draw the graph that has already been built.
@@ -2217,7 +2151,6 @@ switch (cmd) {
   case "update": await cmdUpdate(rest); break;
   case "vendor-graph": await cmdVendorGraph(); break;
   case "diagram": await cmdDiagram(rest); break;
-  case "refresh": await cmdRefresh(rest); break;
   case "transfer": await cmdTransfer(rest); break;
   default:
     // Distinguish "you typed a command I don't know" from "I received nothing

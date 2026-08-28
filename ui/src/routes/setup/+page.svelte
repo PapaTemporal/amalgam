@@ -39,14 +39,7 @@
    * be visible and refusable in the place everything else about the machine
    * lives.
    */
-  let refresh = $state(null);
-  const loadRefresh = () => get("/refresh").then((r) => (refresh = r)).catch(() => {});
-  $effect(() => { if (!refresh) loadRefresh(); });
 
-  async function toggleAuto() {
-    try { await post("/refresh/auto", { on: !refresh.on }); } catch (e) { alert(e.message); }
-    loadRefresh();
-  }
 
   const seconds = (ms) => `${Math.round(ms / 1000)}s`;
   const minutes = (ms) => `${Math.round(ms / 60000)} minutes`;
@@ -415,8 +408,8 @@
           <span>
             <strong>Also build the graphs this machine needs</strong>
             <br /><span class="tiny muted">
-              Minutes, not seconds, on a large repository — and how this machine learns
-              what its own rebuilds cost, without which they never refresh themselves.
+              Minutes, not seconds, on a large repository. A graph is only built when
+              asked for, so a machine without one answers from files until you do.
             </span>
           </span>
         </label>
@@ -556,71 +549,7 @@
   </div>
 {/if}
 
-{#if refresh}
-  <div class="card" style="margin-bottom:1.25rem">
-    <div class="spread">
-      <div>
-        <h2 style="margin:0">Keeping graphs current</h2>
-        <p class="tiny muted" style="margin:.35rem 0 0;max-width:74ch">
-          When a session ends, a graph that has fallen behind its code is rebuilt — the machine is
-          idle, nobody is waiting, and the session that benefits is the next one. Only the index is
-          rebuilt: drawing and clustering are what make it slow and neither changes what an agent
-          can find.
-        </p>
-      </div>
-      <button class:primary={!refresh.on} onclick={toggleAuto} disabled={refresh.forced}>
-        {refresh.on ? "Turn it off" : "Turn it on"}
-      </button>
-    </div>
 
-    {#if refresh.forced}
-      <p class="tiny faint" style="margin:.5rem 0 0">
-        Held <strong>{refresh.on ? "on" : "off"}</strong> by <span class="mono">AMALGAM_AUTO_REFRESH</span>
-        in this environment, which wins over anything chosen here.
-      </p>
-    {/if}
-
-    <p class="tiny" style="margin:.6rem 0 0">
-      {#if !refresh.last}
-        <span style="color:var(--warn)">It has never actually run on this machine.</span>
-        <span class="faint">Which is not the same as having nothing to do — see the table.</span>
-      {:else if refresh.last.error}
-        <span style="color:var(--bad)">Last run {refresh.last.at} failed: {refresh.last.error}</span>
-      {:else if refresh.last.rebuilt.length}
-        <span class="faint">Last ran {refresh.last.at} and rebuilt
-          <strong>{refresh.last.rebuilt.join(", ")}</strong>.</span>
-      {:else}
-        <span class="faint">Last ran {refresh.last.at}; nothing was due.</span>
-      {/if}
-    </p>
-
-    <p class="tiny faint" style="margin:.6rem 0 0">
-      At most {seconds(refresh.budgetMs)} per repository, and never the same one again inside
-      {minutes(refresh.cooldownMs)}. A repository amalgam has not timed here is never started on a
-      guess — size predicts build cost badly, so it waits for one deliberate build to learn from.
-    </p>
-
-    {#if refresh.plan.length}
-      <table style="margin-top:.7rem">
-        <thead><tr><th>Repository</th><th>Last build</th><th>What happens when a session ends</th></tr></thead>
-        <tbody>
-          {#each refresh.plan as r}
-            <tr>
-              <td class="mono tiny">{r.name}</td>
-              <td class="tiny faint">{r.lastBuildMs == null ? "never timed here" : seconds(r.lastBuildMs)}</td>
-              <td class="tiny">
-                {#if r.refresh}<span style="color:var(--good)">rebuilds</span> — {r.reason}
-                {:else}<span class="faint">nothing</span> — {r.reason}{/if}
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-    {:else}
-      <p class="tiny faint" style="margin:.6rem 0 0">No projects registered yet.</p>
-    {/if}
-  </div>
-{/if}
 
 {/if}
 

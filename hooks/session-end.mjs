@@ -67,8 +67,6 @@ try {
   // Whether anything is due is worked out by the child, not here: deciding
   // means asking git about every registered repository, and this file is not
   // allowed to spend that while somebody waits for their prompt.
-  const { autoRefreshEnabled } = await import("../lib/refresh.mjs");
-  if (autoRefreshEnabled()) detach([path.join(HERE, "..", "bin", "amalgam.mjs"), "refresh"]);
 } catch (e) {
   // A session must always be allowed to end, so nothing here is fatal. But
   // silence while developing a hook means debugging blind, so the failure is
