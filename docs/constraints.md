@@ -82,11 +82,29 @@ against and measured on; the release still mirrors CPU builds only. Turning this
 on is someone's local choice about their own machine, not a supported second
 configuration to design for.
 
-## 2. Nothing is installed, and nothing needs admin
+## 2. Nothing needs admin
 
-No `sudo`, no elevation prompt, no service registration, no package manager, no
-writes to `/usr/local`, `Program Files` or the registry. Everything is portable
-or built here.
+The line is **administrator rights**, not installation. No `sudo`, no elevation
+prompt, no service registration, no writes to `/usr/local`, `Program Files`, the
+registry, or anything else owned by the system.
+
+A user-space package manager is on the right side of that line and always was.
+`uv tool run`, `npm install`, `uv sync` and their kind build an environment
+inside a directory the user already owns; they touch no kernel, no system path
+and no shared resource, and a locked-down machine that forbids installers still
+permits them. amalgam uses this itself — graphify runs through `uv`, and BMAD is
+installed by amalgam for exactly this reason.
+
+So "nothing is installed" was always the wrong phrasing for the rule. What must
+never happen is a step the user cannot perform without asking someone for
+rights. Fetching a package into a user-owned environment is not that step;
+running an MSI, writing a service, or asking for a password is.
+
+This is still why memory is SQLite through Node's built-in module: the portable
+PostgreSQL it replaced wanted a 307 MB download, an `initdb`/`pg_ctl` lifecycle
+and a TCP port — costs unrelated to privilege, and worth avoiding on their own.
+It is why the local model is a file plus a binary the user's own account starts,
+rather than a daemon.
 
 This is why memory is SQLite through Node's built-in module: the portable
 PostgreSQL it replaced wanted a 307 MB download, an `initdb`/`pg_ctl` lifecycle
@@ -121,14 +139,28 @@ Relocatability also governs what gets written *into* configuration. `wire` and
 the running binary, and an absolute path only when it does not — because an
 absolute path is frozen to a location, and a portable install moves.
 
-## 4. Nothing is fetched from a host this project does not publish
+## 4. Payloads come from this project's release; no service is called
 
 From the brief: no cloud services and no model services for anything except the
-call to the frontier model. Every payload comes from this repository's own
-release — a fallback chain ending at huggingface, ggml-org or a CDN means the
-answer to "where did this binary come from" is "whichever host answered",
-decided on a machine nobody was watching, at the moment something had already
-gone wrong.
+call to the frontier model. Every **payload** — runtimes, models, vendored
+libraries — comes from this repository's own release. A fallback chain ending at
+huggingface, ggml-org or a CDN means the answer to "where did this binary come
+from" is "whichever host answered", decided on a machine nobody was watching, at
+the moment something had already gone wrong.
+
+**A package registry is not a service call.** `uv tool run --from graphifyy`
+resolves from PyPI, and that is fine: it is the same category as rule 2's
+user-space installs, it is reproducible from a name and a version, and it is not
+a *service* being consulted — nothing about the work is sent anywhere and no
+answer comes back that changes behaviour. The thing this rule forbids is
+amalgam handing your code, your queries or your context to somebody else's
+machine, and quietly sourcing a binary from a host you did not choose. Resolving
+a named package into a local environment is neither.
+
+The distinction that matters: **would a person be surprised to learn this
+happened?** A registry fetch during a documented build step, no. A model call to
+an API, or a binary silently pulled from a mirror because the release timed out,
+yes.
 
 Mirroring upstream into the release is a **publishing** step, run deliberately
 on a maintainer's machine. It is the only moment anything here reads an upstream
