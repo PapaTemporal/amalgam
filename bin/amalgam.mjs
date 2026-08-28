@@ -492,6 +492,51 @@ async function cmdStart() {
   }
 }
 
+/**
+ * Turn GPU offload on or off, and say what is in force.
+ *
+ * A command rather than only an environment variable because the servers are
+ * started by whatever process needs one first — an MCP server, a detached hook
+ * — and those inherit the environment of the program that launched them, not
+ * the shell where somebody exported something. A file under HOME is the only
+ * place all of them agree to look.
+ */
+async function cmdGpu(args) {
+  const { GPU_FILE, gpuEnabled, deviceArgs, llamaServerPath } = await import("../lib/services.mjs");
+  const want = args.find((a) => !a.startsWith("--"));
+
+  if (want === "on" || want === "off") {
+    fs.mkdirSync(path.dirname(GPU_FILE), { recursive: true });
+    fs.writeFileSync(GPU_FILE, JSON.stringify({ enabled: want === "on" }, null, 2) + "\n");
+    console.log(`GPU offload ${want === "on" ? "enabled" : "disabled"} -> ${GPU_FILE}`);
+    if (want === "on") {
+      console.log("Restart any running server for this to take effect:  amalgam stop");
+      console.log("This is an exception, not the default — see docs/constraints.md.");
+    }
+    return;
+  }
+  if (want && want !== "status") {
+    console.error(`Usage: amalgam gpu [on|off|status]`);
+    process.exit(1);
+  }
+
+  console.log(`GPU offload : ${gpuEnabled() ? "ENABLED (opt-in)" : "off (default)"}`);
+  console.log(`  setting   : ${fs.existsSync(GPU_FILE) ? GPU_FILE : "not set — defaults to off"}`);
+  if (process.env.AMALGAM_GPU) console.log(`  override  : AMALGAM_GPU=${process.env.AMALGAM_GPU} (this run only)`);
+  console.log(`  launch    : llama-server ... ${deviceArgs().join(" ")}`);
+  // What the installed binary can actually reach, asked of the binary rather
+  // than guessed. Purely informational: nothing here turns anything on.
+  const bin = llamaServerPath();
+  if (fs.existsSync(bin)) {
+    const r = spawnSync(bin, ["--list-devices"], { encoding: "utf8", timeout: 20000 });
+    const devices = (r.stdout ?? "").split("\n").filter((l) => /^\s{2}\w+:/.test(l));
+    console.log(`  devices   : ${devices.length ? devices.map((d) => d.trim()).join("; ") : "none reported"}`);
+    if (devices.length && !gpuEnabled()) {
+      console.log("              (present, and deliberately unused — `amalgam gpu on` to change that)");
+    }
+  }
+}
+
 function cmdStop() {
   stopLlama();
   console.log("llama-server stopped (if it was running). Memory needs no shutdown.");
@@ -2129,6 +2174,7 @@ switch (cmd) {
   case "install": await cmdInstall(rest); break;
   case "start": await cmdStart(); break;
   case "stop": cmdStop(); break;
+  case "gpu": await cmdGpu(rest); break;
   case "status": await cmdStatus(); break;
   case "stats": cmdStats(); break;
   case "memory": await cmdMemory(rest); break;
@@ -2174,6 +2220,7 @@ Usage:
                  [--cache <dir>]    --with-model adds digest/caveman too (~2.5 GB)
   amalgam start                     warm the optional model (memory needs no service)
   amalgam stop                      stop the model if running
+  amalgam gpu [on|off|status]       GPU offload (off by default; see docs/constraints.md)
   amalgam status                    health check
   amalgam version                   what is deployed vs. what this source has
   amalgam update                    pull, re-deploy, and refresh every wired copy

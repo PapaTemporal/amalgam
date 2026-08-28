@@ -20,6 +20,7 @@
  * Usage: node tests/constraints-eval.mjs
  */
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -46,14 +47,58 @@ const embed = code("lib/embed.mjs");
 
 check("CPU_ONLY disables both device offload and layer offload",
   /export const CPU_ONLY = \[[^\]]*"--device",\s*"none"[^\]]*"-ngl",\s*"0"[^\]]*\]/.test(services),
-  "lib/services.mjs must pin llama-server to the CPU for every caller");
+  "lib/services.mjs must be able to pin llama-server to the CPU");
+
+// GPU offload is a supported exception (docs/constraints.md §1), so the rule is
+// no longer "never offload" — it is that CPU is what you get unless somebody
+// said otherwise. That is worth asserting by running it rather than by reading
+// it: point HOME at an empty directory, which is what an untouched install
+// looks like, and ask what the servers would actually be launched with.
+{
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "amalgam-gpu-"));
+  const saved = { home: process.env.AMALGAM_HOME, gpu: process.env.AMALGAM_GPU };
+  process.env.AMALGAM_HOME = tmp;
+  delete process.env.AMALGAM_GPU;
+  const svc = await import(`../lib/services.mjs?constraints=${Date.now()}`);
+
+  check("with nothing configured, the GPU is off",
+    svc.gpuEnabled() === false, "an untouched install must never offload");
+  check("with nothing configured, servers launch pinned to the CPU",
+    svc.deviceArgs().join(" ") === "--device none -ngl 0",
+    `deviceArgs() = ${JSON.stringify(svc.deviceArgs())}`);
+
+  fs.writeFileSync(path.join(tmp, "gpu.json"), JSON.stringify({ enabled: true }));
+  check("the opt-in is what turns it on, and it does turn it on",
+    svc.gpuEnabled() === true && !svc.deviceArgs().includes("--device"),
+    `after opting in: ${JSON.stringify(svc.deviceArgs())}`);
+
+  fs.writeFileSync(path.join(tmp, "gpu.json"), "{ not json");
+  check("a malformed setting falls back to CPU, not to the GPU",
+    svc.gpuEnabled() === false, "an unreadable opt-in is not an opt-in");
+
+  if (saved.home === undefined) delete process.env.AMALGAM_HOME; else process.env.AMALGAM_HOME = saved.home;
+  if (saved.gpu !== undefined) process.env.AMALGAM_GPU = saved.gpu;
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+// The opt-in must be a decision, never a discovery. If it asked the machine
+// what it had, the same install would offload on a workstation and not on the
+// VM it ships to, and that difference would surface as a performance mystery
+// rather than as a setting somebody chose.
+{
+  const body = services.slice(services.indexOf("export function gpuEnabled()"));
+  const fn = body.slice(0, body.indexOf("\n}\n") + 3);
+  check("the GPU opt-in never probes the hardware",
+    !/list-devices|llamaServerPath|spawnSync|spawn\(|cpus\(\)|platform|arch/.test(fn),
+    "it reads a setting and an env var, and nothing else");
+}
 
 // Call sites are found by looking for llamaServerPath(), not from a list, so a
 // spawn added later is checked too rather than silently exempt.
 for (const [rel, src] of [["lib/services.mjs", services], ["lib/embed.mjs", embed]]) {
   const spawns = src.split(/spawn\(/).slice(1).filter((s) => s.slice(0, 400).includes("llamaServerPath()"));
-  check(`${rel}: every llama-server spawn passes CPU_ONLY`,
-    spawns.length > 0 && spawns.every((s) => s.slice(0, 900).includes("...CPU_ONLY")),
+  check(`${rel}: every llama-server spawn goes through deviceArgs()`,
+    spawns.length > 0 && spawns.every((s) => s.slice(0, 900).includes("...deviceArgs()")),
     `${spawns.length} spawn(s) of llama-server found`);
 }
 

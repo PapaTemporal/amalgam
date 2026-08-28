@@ -225,9 +225,18 @@ amalgam status     # what is installed and running, and how idle the model is
 amalgam version    # deployed vs. this checkout
 amalgam update     # pull, re-deploy, refresh every wired copy
 amalgam stats      # measured savings, counted only where a counterfactual exists
+amalgam gpu        # GPU offload: off by default, opt-in per machine
 amalgam wire --user
 amalgam shim
 ```
+
+`amalgam gpu status` reports what is in force and what devices the installed
+binary can actually see; `on` and `off` set it. The default is CPU, because the
+deployment target is a virtual machine with no GPU — see
+**[Hard constraints](constraints.md)** for why this is the one exception the
+rules make, and what keeps it from becoming a second configuration to design
+for. It is never inferred from the hardware: a machine offloads because someone
+said so, or not at all.
 
 ## Environment
 

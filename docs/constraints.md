@@ -39,6 +39,49 @@ must pass it.
 Prefer a `-cpu` upstream asset where one exists. Never mirror a `cuda`,
 `vulkan`, `rocm`, `sycl`, `opencl` or `openvino` build.
 
+### The one exception: GPU offload, opt-in
+
+Some people will run this on a workstation that does have a GPU, and refusing
+to use it there is a different kind of wrong — the rule exists so the stack
+*works without* one, not so it never touches one.
+
+So GPU offload is available and **off by default**:
+
+```bash
+amalgam gpu status      # what is in force, and what the binary can see
+amalgam gpu on          # opt in — writes {"enabled":true} to $AMALGAM_HOME/gpu.json
+amalgam gpu off         # back to the default
+```
+
+`AMALGAM_GPU=1` / `AMALGAM_GPU=0` overrides the file for one run. Layer count
+is `AMALGAM_GPU_LAYERS`, defaulting to all of them.
+
+Four properties make this an exception rather than a loosening, and
+`tests/constraints-eval.mjs` asserts each by running it rather than reading it:
+
+1. **An untouched install is CPU-pinned.** With nothing configured,
+   `deviceArgs()` returns `--device none -ngl 0`.
+2. **It is never inferred.** `gpuEnabled()` reads a setting and an environment
+   variable and does not ask the machine what hardware it has. Detection would
+   make the same install behave differently on a laptop and on the VM it ships
+   to, and that difference would appear as a performance mystery rather than as
+   a decision someone made.
+3. **A malformed or unreadable setting means off.** Failing toward the default
+   is the only safe direction when the default is the deployment target.
+4. **It cannot be half-applied.** Both servers take their flags from
+   `deviceArgs()`, so there is no configuration where the generation model
+   offloads and the embedding model does not.
+
+Everything else in this document still holds when it is on. A GPU does not make
+the install less portable, does not need admin, and does not change where
+payloads come from — which is exactly why this one can be an exception and the
+others cannot.
+
+**A setting is not a target.** CPU remains what is developed against, tested
+against and measured on; the release still mirrors CPU builds only. Turning this
+on is someone's local choice about their own machine, not a supported second
+configuration to design for.
+
 ## 2. Nothing is installed, and nothing needs admin
 
 No `sudo`, no elevation prompt, no service registration, no package manager, no
