@@ -211,6 +211,7 @@ symbols rather than text, and hands you a merge order.
 | Which model runs a task, and who decides | **[Model routing](docs/models.md)** |
 | Requirements, wiring, proxies, updating | **[Installing](docs/install.md)** |
 | Why each part works the way it does | **[Design notes](docs/design.md)** |
+| What may never change: no GPU, no admin, no host you did not pick | **[Hard constraints](docs/constraints.md)** |
 
 ## What it is made of
 

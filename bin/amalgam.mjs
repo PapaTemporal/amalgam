@@ -110,6 +110,11 @@ const MODEL_FILE = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf";
 //   4. manual: the browser instructions printed on failure (assets download
 //      fine from the release page in a logged-in browser)
 const RELEASE = { repo: "PapaTemporal/amalgam", tag: "v0.1.0" };
+// vis-network, mirrored onto the release so the interactive graph page has no
+// host in it this project does not control. The upstream address is kept only
+// to be shown to somebody choosing to fetch it themselves — nothing here calls it.
+const VIS_ASSET = "vis-network-9.1.6.min.js";
+const VIS_UPSTREAM = "https://unpkg.com/vis-network@9.1.6/standalone/umd/vis-network.min.js";
 const RELEASE_PAGE = `https://github.com/${RELEASE.repo}/releases/tag/${RELEASE.tag}`;
 // The model ships as a llama.cpp split GGUF (each part under GitHub's 2 GiB
 // asset cap). llama-server loads part 1 and pulls the rest automatically —
@@ -128,7 +133,7 @@ const DOWNLOADS = [
   {
     id: "llama.cpp (portable CPU build)",
     asset: "llama-cpu-x64.zip",
-    url: "https://github.com/ggml-org/llama.cpp/releases/download/b10532/llama-b10532-bin-win-cpu-x64.zip",
+    manualUrl: "https://github.com/ggml-org/llama.cpp/releases/download/b10532/llama-b10532-bin-win-cpu-x64.zip",
     archive: path.join(HOME, "downloads", "llama-cpu-x64.zip"),
     extractTo: path.join(HOME, "runtime", "llama"),
     check: path.join(HOME, "runtime", "llama", exe("llama-server")),
@@ -163,8 +168,8 @@ const DOWNLOADS = [
   {
     id: "bge-small embedding model (semantic recall)",
     asset: EMBED_MODEL_FILE,
-    url: `https://huggingface.co/CompendiumLabs/bge-small-en-v1.5-gguf/resolve/main/${EMBED_MODEL_FILE}`,
-    mirrors: [`https://hf-mirror.com/CompendiumLabs/bge-small-en-v1.5-gguf/resolve/main/${EMBED_MODEL_FILE}`],
+    manualUrl: `https://huggingface.co/CompendiumLabs/bge-small-en-v1.5-gguf/resolve/main/${EMBED_MODEL_FILE}`,
+    manualMirrors: [`https://hf-mirror.com/CompendiumLabs/bge-small-en-v1.5-gguf/resolve/main/${EMBED_MODEL_FILE}`],
     archive: path.join(HOME, "models", EMBED_MODEL_FILE),
     check: path.join(HOME, "models", EMBED_MODEL_FILE),
     winOnly: false,
@@ -198,8 +203,8 @@ const DOWNLOADS = [
 // the original single file (used only when both split parts are missing).
 const MODEL_SINGLE_FALLBACK = {
   id: "Qwen3-4B-Instruct GGUF model (single file)",
-  url: `https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/${MODEL_FILE}`,
-  mirrors: [`https://hf-mirror.com/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/${MODEL_FILE}`],
+  manualUrl: `https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/${MODEL_FILE}`,
+  manualMirrors: [`https://hf-mirror.com/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/${MODEL_FILE}`],
   archive: path.join(HOME, "models", MODEL_FILE),
   approx: "~2.4 GB",
 };
@@ -207,29 +212,40 @@ const MODEL_SINGLE_FALLBACK = {
 function manualHelp(items) {
   const lines = [
     "",
-    "================= MANUAL DOWNLOAD (proxy fallback) =================",
-    "Automatic download failed (common behind corporate proxies).",
+    "===================== FETCH THESE YOURSELF =====================",
+    "Could not get these from the release. Nothing else was tried:",
+    "amalgam downloads from its own release and from nowhere else, so the",
+    "choice to use another host is yours to make, not one it makes quietly",
+    "on your behalf.",
     "",
-    "EASIEST — use your web browser (works for the private repo while you",
-    "are logged in to GitHub):",
+    "EASIEST — use your web browser:",
     `  1. Open  ${RELEASE_PAGE}`,
     "  2. Download the assets listed below",
     "  3. Save each one to its destination path",
     "  4. Re-run:  amalgam install",
     "",
   ];
+  let anyUpstream = false;
   for (const d of items) {
     lines.push(`  ${d.id}  (${d.approx})`);
-    if (d.asset) lines.push(`    Release asset: ${d.asset}`);
-    if (d.url) lines.push(`    External URL : ${d.url}`);
-    for (const m of d.mirrors ?? []) lines.push(`    Mirror       : ${m}`);
-    lines.push(`    Save to      : ${d.archive}`);
+    if (d.asset) lines.push(`    Release asset : ${d.asset}`);
+    // Shown, never fetched. These are the upstreams the release mirrors, so
+    // somebody who cannot reach the release can still get the same file — with
+    // the host in front of them rather than chosen for them.
+    if (d.manualUrl) { lines.push(`    Upstream      : ${d.manualUrl}`); anyUpstream = true; }
+    for (const m of d.manualMirrors ?? []) lines.push(`    Mirror        : ${m}`);
+    lines.push(`    Save to       : ${d.archive}`);
     lines.push("");
   }
-  lines.push("The model alternative: instead of the two split parts you may fetch the");
-  lines.push(`single file from the External URL/Mirror above and save it to`);
-  lines.push(`${MODEL_SINGLE_FALLBACK.archive} — either form works.`);
-  lines.push("curl honors HTTP_PROXY / HTTPS_PROXY env vars if your proxy allows CLI traffic.");
+  if (anyUpstream) {
+    lines.push("The upstream addresses are listed for you to use if you choose to.");
+    lines.push("amalgam will not contact them.");
+  }
+  lines.push(`Model alternative: instead of the two split parts, the single file at`);
+  lines.push(`${MODEL_SINGLE_FALLBACK.manualUrl}`);
+  lines.push(`saved to ${MODEL_SINGLE_FALLBACK.archive} works identically.`);
+  lines.push("Already have these on another machine? Copy them to the paths above, or");
+  lines.push("pass  --cache <dir>  and they will be taken from there.");
   lines.push("====================================================================");
   return lines.join("\n");
 }
@@ -285,25 +301,26 @@ function downloadReleaseAsset(assetName, dest) {
   return false;
 }
 
+/**
+ * Fetch one payload. There is exactly one place it can come from: this
+ * project's own release.
+ *
+ * The chain of upstream URLs that used to follow this is gone. It is not that
+ * huggingface or ggml-org are untrustworthy — it is that a fallback makes the
+ * answer to "where did this binary come from" depend on which host happened to
+ * answer, decided on somebody else's machine, at the one moment nobody was
+ * watching because something had already gone wrong.
+ *
+ * The addresses survive as `manualUrl` / `manualMirrors`, printed by
+ * manualHelp. Telling a person where a file lives is not the same as fetching
+ * it for them: they can see the host, choose it, and check what they got. That
+ * decision belongs to whoever owns the machine.
+ */
 function download(d) {
   fs.mkdirSync(path.dirname(d.archive), { recursive: true });
-  if (d.asset) {
-    console.log(`  fetching ${d.id} ${d.approx} from release ${RELEASE.tag} ...`);
-    if (downloadReleaseAsset(d.asset, d.archive)) return true;
-  }
-  const tmp = d.archive + ".part";
-  for (const url of [d.url, ...(d.mirrors ?? [])].filter(Boolean)) {
-    console.log(`  downloading ${d.id} ${d.approx} from ${new URL(url).host} ...`);
-    const r = spawnSync("curl", ["-L", "--fail", "--retry", "2", "-o", tmp, url], {
-      stdio: ["ignore", "inherit", "inherit"],
-    });
-    if (r.status === 0) {
-      fs.renameSync(tmp, d.archive);
-      return true;
-    }
-    try { fs.rmSync(tmp, { force: true }); } catch {}
-  }
-  return false;
+  if (!d.asset) return false;
+  console.log(`  fetching ${d.id} ${d.approx} from release ${RELEASE.tag} ...`);
+  return downloadReleaseAsset(d.asset, d.archive);
 }
 
 function extractZip(zip, dest, members = [], stripComponents = 0) {
@@ -418,15 +435,13 @@ async function cmdInstall(args) {
       }
     }
   }
-  // Model rescue: if only the split parts failed (release unreachable), try
-  // the original single file from the public HF host/mirror instead.
-  const failedParts = failed.filter((d) => MODEL_PARTS.includes(d.asset));
-  if (failedParts.length > 0 && !fs.existsSync(MODEL_SINGLE_FALLBACK.archive)) {
-    console.log("Release unreachable for model parts — trying single-file fallback ...");
-    if (download(MODEL_SINGLE_FALLBACK)) {
-      for (const d of failedParts) failed.splice(failed.indexOf(d), 1);
-    }
-  }
+  // A single-file copy of the model already on disk is still accepted — it
+  // loads exactly like the split pair, and altCheck finds it. What used to
+  // happen here was different: when the release could not be reached, the
+  // installer went and fetched that file from huggingface on its own. A rescue
+  // path to a third party is still a third party, and one that only runs after
+  // something has already failed is the worst moment to start trusting a host
+  // nobody picked. The address is printed by manualHelp instead.
   if (failed.length) {
     console.error(manualHelp(failed));
     process.exit(1);
@@ -2061,10 +2076,13 @@ async function cmdVendorGraph() {
     console.log("The interactive graph opens without touching the network.");
     return;
   }
-  const url = "https://unpkg.com/vis-network@9.1.6/standalone/umd/vis-network.min.js";
-  console.log(`Fetching ${url} ...`);
+  // From the release, like everything else. This was the last download in the
+  // stack still pointed at a CDN, which made "the graph never touches the
+  // network" true only after a call to a host this file chose rather than you.
+  console.log(`Fetching ${VIS_ASSET} from release ${RELEASE.tag} ...`);
   try {
-    const res = await fetch(url);
+    const res = await fetch(
+      `https://github.com/${RELEASE.repo}/releases/download/${RELEASE.tag}/${VIS_ASSET}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const body = Buffer.from(await res.arrayBuffer());
     // A truncated or redirected download would leave a file that exists and
@@ -2077,8 +2095,14 @@ async function cmdVendorGraph() {
     console.log(`  ${(body.length / 1024).toFixed(0)} KB -> ${VIS_FILE}`);
     console.log("The interactive graph now opens without touching the network.");
   } catch (e) {
-    console.error(`Could not fetch it: ${e.message}`);
-    console.error("The graph still works while you are online.");
+    console.error(`Could not fetch it from the release: ${e.message}`);
+    console.error(`  Expected ${VIS_ASSET} on ${RELEASE_PAGE}`);
+    console.error("");
+    console.error("Nothing else was tried. If you would rather take it from upstream,");
+    console.error("that is your call to make — the same file is published at:");
+    console.error(`  ${VIS_UPSTREAM}`);
+    console.error(`Save it as ${VIS_FILE} and the graph stops needing the network.`);
+    console.error("Until then the graph still works while you are online.");
     process.exit(1);
   }
 }
