@@ -15,11 +15,50 @@ The commands below are what those buttons run.
 
 ## Requirements
 
-- **Node 22.5+** (the only hard prerequisite — it supplies the built-in SQLite the memory
-  store uses; nothing is installed for it)
+- **Node 22.5+, built with SQLite's FTS5** — the one hard prerequisite, and the
+  one thing you supply yourself (see below)
 - Optional: [uv](https://docs.astral.sh/uv/) for graphify code-graph queries
 - Optional: the local model (~2.5 GB, Windows x64) for `digest` and `caveman_*`
 - Default install writes a few hundred KB and needs no admin rights
+
+### Node, and why the version is only half of it
+
+The memory store is SQLite through Node's built-in `node:sqlite`, which arrived
+in 22.5. It indexes every fact, scenario and log line with **FTS5** — and FTS5
+is a *compile-time* option, so whether a given Node has it depends on who built
+that binary, not on how new it is. Homebrew's Node does not. Checking the
+version therefore proves nothing, and a machine missing FTS5 used to install
+cleanly and then fail at its first memory write with `no such module: fts5`.
+
+`amalgam` now checks the capability itself and stops with instructions. To see
+what your Node has:
+
+```bash
+node -e "new (require('node:sqlite').DatabaseSync)(':memory:').exec('CREATE VIRTUAL TABLE t USING fts5(a)')"
+```
+
+Silence means you have it. **The official builds on nodejs.org have it**, and
+they need no installer, no administrator and no package manager — they are
+plain archives you extract wherever you can write:
+
+| Platform | Archive |
+|---|---|
+| Windows x64 / arm64 | `node-v22.23.2-win-x64.zip` · `-win-arm64.zip` |
+| macOS arm64 / x64 | `node-v22.23.2-darwin-arm64.tar.gz` · `-darwin-x64.tar.gz` |
+| Linux x64 / arm64 | `node-v22.23.2-linux-x64.tar.xz` · `-linux-arm64.tar.xz` |
+
+All from <https://nodejs.org/dist/v22.23.2/>. Extract, then run amalgam with
+that binary **by full path** — no PATH edit, no shell profile, nothing that
+depends on whether you use zsh, bash, fish, PowerShell or cmd:
+
+```bash
+node-v22.23.2-darwin-arm64/bin/node bin/amalgam.mjs install
+```
+
+You only do that once. `amalgam wire` and `amalgam shim` record the absolute
+path of whichever Node ran them, so the MCP server, the session hooks and the
+`amalgam` command all use that same runtime afterwards without PATH being
+involved. Re-running `wire` repoints anything an older install left behind.
 
 ## Install (per machine, once)
 

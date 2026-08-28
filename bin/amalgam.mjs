@@ -52,6 +52,48 @@ import { createTask, addEvent, setState, listTasks, resume, renderResume } from 
 
 const PKG = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HOME = process.env.AMALGAM_HOME ?? path.join(os.homedir(), ".amalgam");
+
+/**
+ * The Node that is running right now, by absolute path — written into every
+ * launcher, hook and MCP entry this CLI generates.
+ *
+ * Everything used to be wired as the bare word `node`, which delegates the
+ * choice of runtime to whatever PATH says at the moment something starts. That
+ * is three problems at once. It depends on a PATH edit, and a PATH edit means
+ * knowing the user's shell, which differs by platform and cannot be assumed on
+ * a locked-down machine. It can resolve to a *different* Node than the one that
+ * passed preflight — the portable build has SQLite's FTS5, the package-manager
+ * one beside it may not, and the failure appears later, elsewhere, as a missing
+ * module. And a hook or MCP server started by another program inherits that
+ * program's PATH, not the user's shell.
+ *
+ * Recording process.execPath removes all three: the runtime that installed
+ * amalgam is the runtime that runs it. If it is later moved or deleted, the
+ * failure is an obvious "no such file" naming the exact path, and re-running
+ * `amalgam wire` repoints everything.
+ */
+const NODE = wiringNode();
+
+function wiringNode() {
+  // ...but an absolute path is frozen to a location, and a portable
+  // installation moves: a VDI session hands out a different drive letter, a
+  // share remounts elsewhere, a USB stick is not E: forever. On those machines
+  // the bare word survives a move and the absolute path does not, which is the
+  // wrong trade for the environment this project is built for.
+  //
+  // So the bare word is kept whenever it is *already correct* — when `node` on
+  // PATH resolves to this very binary. The absolute path is written only when
+  // PATH would resolve somewhere else, which is exactly the case it exists to
+  // defend against, and never when it would cost relocatability for nothing.
+  try {
+    const r = spawnSync("node", ["-p", "process.execPath"], { encoding: "utf8" });
+    if (r.status === 0 && r.stdout.trim()) {
+      const onPath = fs.realpathSync(r.stdout.trim());
+      if (onPath === fs.realpathSync(process.execPath)) return "node";
+    }
+  } catch { /* no node on PATH, or it would not answer — pin the path */ }
+  return process.execPath;
+}
 const WIN = process.platform === "win32";
 const exe = (p) => (WIN ? `${p}.exe` : p);
 const MODEL_FILE = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf";
@@ -527,10 +569,21 @@ function wireUser() {
     mergeJsonFile(USER_SETTINGS, (o) => {
       o.hooks ??= {};
       o.hooks[event] ??= [];
-      const already = o.hooks[event].some((entry) =>
-        (entry.hooks ?? []).some((h) => typeof h.command === "string" && h.command.includes(file))
-      );
-      if (!already) o.hooks[event].push({ hooks: [{ type: "command", command: `node "${hookPath}"` }] });
+      const want = `"${NODE}" "${hookPath}"`;
+      // Rewrite an existing entry rather than only skipping it. Wiring written
+      // by an older amalgam invokes the bare word `node`, so re-running `wire`
+      // was leaving the hook pointed at whatever PATH resolves to — which is
+      // the bug this change exists to remove, surviving the fix that removes it.
+      let already = false;
+      for (const entry of o.hooks[event]) {
+        for (const h of entry.hooks ?? []) {
+          if (typeof h.command === "string" && h.command.includes(file)) {
+            already = true;
+            if (h.command !== want) h.command = want;
+          }
+        }
+      }
+      if (!already) o.hooks[event].push({ hooks: [{ type: "command", command: want }] });
     });
     console.log(`${event} hook -> ${USER_SETTINGS}`);
   }
@@ -540,7 +593,7 @@ function wireUser() {
   backupOnce(USER_MCP_CONFIG);
   mergeJsonFile(USER_MCP_CONFIG, (o) => {
     o.mcpServers ??= {};
-    o.mcpServers.amalgam = { command: "node", args: [serverPath] };
+    o.mcpServers.amalgam = { command: NODE, args: [serverPath] };
   });
   console.log(`MCP server -> ${USER_MCP_CONFIG} (mcpServers.amalgam)`);
   recordWiredUser();
@@ -601,7 +654,7 @@ function cmdWire(args) {
   if (doClaude) {
     mergeJsonFile(path.join(proj, ".mcp.json"), (o) => {
       o.mcpServers ??= {};
-      o.mcpServers.amalgam = { command: "node", args: [serverPath] };
+      o.mcpServers.amalgam = { command: NODE, args: [serverPath] };
     });
     for (const s of ["offload", "caveman", "start"]) {
       copyDir(path.join(HOME, "skills", s), path.join(proj, ".claude", "skills", s));
@@ -618,10 +671,19 @@ function cmdWire(args) {
           const p = path.join(HOME, "hooks", file);
           if (!fs.existsSync(p)) continue;
           o.hooks[event] ??= [];
-          const already = o.hooks[event].some((entry) =>
-            (entry.hooks ?? []).some((h) => typeof h.command === "string" && h.command.includes(file))
-          );
-          if (!already) o.hooks[event].push({ hooks: [{ type: "command", command: `node "${p}"` }] });
+          // Same repointing as wireUser: an entry left by an older amalgam says
+          // `node` and must be corrected, not merely counted as present.
+          const want = `"${NODE}" "${p}"`;
+          let already = false;
+          for (const entry of o.hooks[event]) {
+            for (const h of entry.hooks ?? []) {
+              if (typeof h.command === "string" && h.command.includes(file)) {
+                already = true;
+                if (h.command !== want) h.command = want;
+              }
+            }
+          }
+          if (!already) o.hooks[event].push({ hooks: [{ type: "command", command: want }] });
         }
       });
       console.log("Claude Code wired: .mcp.json + .claude/skills/{offload,caveman,start} + SessionStart hook");
@@ -634,7 +696,7 @@ function cmdWire(args) {
   if (doCopilot) {
     mergeJsonFile(path.join(proj, ".vscode", "mcp.json"), (o) => {
       o.servers ??= {};
-      o.servers.amalgam = { type: "stdio", command: "node", args: [serverPath] };
+      o.servers.amalgam = { type: "stdio", command: NODE, args: [serverPath] };
     });
     const ciPath = path.join(proj, ".github", "copilot-instructions.md");
     fs.mkdirSync(path.dirname(ciPath), { recursive: true });
@@ -1111,12 +1173,12 @@ function cmdShim(args) {
   const written = [];
   if (WIN) {
     const cmd = path.join(dir, "amalgam.cmd");
-    fs.writeFileSync(cmd, `@echo off\r\nnode "${cliPath}" %*\r\n`);
+    fs.writeFileSync(cmd, `@echo off\r\n"${NODE}" "${cliPath}" %*\r\n`);
     written.push(cmd);
   }
   // Also write a POSIX launcher: Git Bash and WSL ignore .cmd files.
   const sh = path.join(dir, "amalgam");
-  fs.writeFileSync(sh, `#!/bin/sh\nexec node "${cliPath.replace(/\\/g, "/")}" "$@"\n`);
+  fs.writeFileSync(sh, `#!/bin/sh\nexec "${NODE.replace(/\\/g, "/")}" "${cliPath.replace(/\\/g, "/")}" "$@"\n`);
   try { fs.chmodSync(sh, 0o755); } catch {}
   written.push(sh);
 
