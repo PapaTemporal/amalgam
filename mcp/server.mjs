@@ -33,7 +33,7 @@ import { embed, similarity, toBlob, fromBlob, embeddingsInstalled } from "../lib
 import { verifyFact } from "../lib/verify.mjs";
 import { staleFiles, projectStaleFiles } from "../lib/freshness.mjs";
 import { createTask, addEvent, setState, listTasks, resume, renderResume } from "../lib/tasks.mjs";
-import { hasGraph, findSymbols, sliceSymbol, callersOf, calleesOf,
+import { hasGraph, graphifySpec, graphifyArgs, findSymbols, sliceSymbol, callersOf, calleesOf,
          changedFiles, changedRanges, symbolsInRanges } from "../lib/graph.mjs";
 import { isIndexed, graphFromDb, searchSymbols } from "../lib/graphdb.mjs";
 import { graphFor as graphForAny, isWorkspace, searchWorkspace,
@@ -227,7 +227,7 @@ function graphDrift(repo, g) {
 // ------------------------------------------------------------- graphify bridge
 function graphify(repo, cliArgs) {
   return new Promise((resolve, reject) => {
-    const p = spawn("uv", ["tool", "run", "--from", "graphifyy", "graphify", ...cliArgs], {
+    const p = spawn("uv", ["tool", "run", "--from", graphifySpec(), "graphify", ...graphifyArgs(cliArgs)], {
       cwd: repo,
       windowsHide: true,
     });
@@ -786,9 +786,9 @@ async function handleTool(name, args) {
     case "graph_query": {
       const repo = args.repo;
       if (!fs.existsSync(repo)) throw new Error(`Repo not found: ${repo}`);
-      // --code-only: local tree-sitter AST only; the doc/image semantic pass
-      // would call a cloud LLM backend, which this stack forbids.
-      if (args.mode === "build") return await graphify(repo, [args.a ?? ".", "--code-only"]);
+      // --code-only is applied by graphifyArgs() for every extraction, so no
+      // call site here has to remember it. See lib/graph.mjs.
+      if (args.mode === "build") return await graphify(repo, [args.a ?? "."]);
       const out = args.mode === "explain" ? await graphify(repo, ["explain", args.a])
         : args.mode === "path" ? await graphify(repo, ["path", args.a, args.b])
           : await graphify(repo, ["query", args.a]);

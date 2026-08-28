@@ -171,6 +171,40 @@ for (const name of ["manualUrl", "manualMirrors", "VIS_UPSTREAM"]) {
   check(`${name} is never handed to a downloader`, !misuse.test(cliCode));
 }
 
+// --- 4b. the extractor is pinned, and cannot take the cloud pass -------------
+// graphify ships several times a day. Unpinned, two machines building the same
+// graph can disagree and a rebuild can change results for a reason nothing
+// recorded — under a README that reports measured numbers.
+{
+  const graphMod = code("lib/graph.mjs");
+  check("the graphify version is pinned",
+    /export const GRAPHIFY_VERSION = "\d+\.\d+\.\d+"/.test(graphMod) &&
+    /graphifyy\$\{extras\}==\$\{GRAPHIFY_VERSION\}/.test(graphMod),
+    "an extractor that drifts underneath a measurement invalidates it");
+
+  // Every invocation must resolve its package through graphifySpec(), so there
+  // is one place a version lives and no call site can float.
+  for (const rel of ["bin/amalgam.mjs", "mcp/server.mjs"]) {
+    const bad = code(rel).split("\n").filter((l) => /"graphifyy"|'graphifyy'|graphifyy\[/.test(l));
+    check(`${rel}: no unpinned graphifyy reference`, bad.length === 0,
+      bad.length ? bad[0].trim().slice(0, 70) : "");
+  }
+
+  // --code-only keeps graphify on local tree-sitter parsing. Without it the
+  // doc/image pass reaches a cloud backend — rule 4, enforced by a flag. The
+  // flag is applied centrally so a call site cannot forget it; assert that the
+  // central place still does it, and that nothing spawns graphify around it.
+  check("extraction is forced local by graphifyArgs()",
+    /export function graphifyArgs/.test(graphMod) && /--code-only/.test(graphMod),
+    "the doc/image pass calls a cloud backend and must be unreachable");
+  for (const rel of ["bin/amalgam.mjs", "mcp/server.mjs"]) {
+    const spawns = code(rel).split("\n").filter((l) => /"graphify"/.test(l) && /spawn|spawnSync|"tool", "run"/.test(l));
+    check(`${rel}: every graphify spawn goes through graphifyArgs()`,
+      spawns.length > 0 && spawns.every((l) => l.includes("graphifyArgs(")),
+      `${spawns.length} spawn(s) checked`);
+  }
+}
+
 // --- 5. degrade, never fail --------------------------------------------------
 check("embeddings are optional at runtime, not just at install",
   /export function embeddingsInstalled\(\)/.test(embed),

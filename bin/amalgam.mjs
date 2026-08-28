@@ -35,6 +35,7 @@ import { services as workspaceServices, isWorkspace } from "../lib/workspace.mjs
 import { rank as rankRisk, render as renderSurvey } from "../lib/survey.mjs";
 import { analyse as analyseCollisions, render as renderCollisions } from "../lib/collide.mjs";
 import { isIndexed, graphFromDb } from "../lib/graphdb.mjs";
+import { graphifySpec, graphifyArgs } from "../lib/graph.mjs";
 import { findSpecs, parseSprintStatus, assess, verify as verifyStories,
          summarise, render as renderTrace } from "../lib/trace.mjs";
 // The reclamation rules live in lib/streams.mjs so they can be tested against
@@ -832,8 +833,8 @@ function buildOneGraph(dir, { sql = false, label = false, quiet = false } = {}) 
   // graphify's own hint says `pip install graphifyy[sql]`, which does not apply
   // here: it runs through uv in an ephemeral environment, so the extra belongs
   // in the --from spec instead.
-  const from = sql ? "graphifyy[sql]" : "graphifyy";
-  const r = spawnSync("uv", ["tool", "run", "--from", from, "graphify", ".", "--code-only"], {
+  const from = graphifySpec(sql ? "[sql]" : "");
+  const r = spawnSync("uv", ["tool", "run", "--from", from, "graphify", ...graphifyArgs(["."])], {
     cwd: dir, stdio: ["ignore", "inherit", "inherit"],
   });
   if (r.status !== 0) {
@@ -874,7 +875,7 @@ function clusterOneGraph(dir, { label = false } = {}) {
   // is exactly the one worth having, because the whole point is to land on it
   // and filter down. Skipping it produced nothing to filter.
   const heavy = nodes > 20000;
-  const args = ["tool", "run", "--from", "graphifyy", "graphify", "cluster-only", "."];
+  const args = ["tool", "run", "--from", graphifySpec(), "graphify", ...graphifyArgs(["cluster-only", "."])];
   const env = { ...process.env };
 
   // Naming the communities is the difference between a legend that reads
