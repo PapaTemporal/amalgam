@@ -20,7 +20,7 @@ import fs from "node:fs";
 
 import os from "node:os";
 import { ensureLlama, modelInstalled } from "../lib/services.mjs";
-import { llama, rerankSymbols } from "../lib/llm.mjs";
+import { llama, rerankSymbols, expandQuery } from "../lib/llm.mjs";
 import { check as runCheck, render as renderCheck } from "../lib/checks.mjs";
 import { runGate, renderGate, detectChecks } from "../lib/gates.mjs";
 import { rank as rankRisk, render as renderSurvey } from "../lib/survey.mjs";
@@ -150,9 +150,15 @@ async function selectSymbols(repo, g, task, limit, { rerank = true } = {}) {
         // five from 6/12 to 10/12, for a few seconds of local compute — a
         // trade this project exists to make. The first hits are never
         // reordered; see rerankSymbols for why.
+        // A second vocabulary for the same question, guessed by the local
+        // model. The lexical half of the search is strong exactly when a
+        // question shares words with its answer and useless when it does not;
+        // this manufactures the overlap. Measured on this repository it moves
+        // intent questions from 3 of 12 in the top three to 5.
+        const alsoTry = rerank && modelInstalled() ? await expandQuery(task) : null;
         const wide = g.workspace
-          ? searchWorkspace(repo, task, { vec: qv, limit: Math.max(limit * 4, 20), similarity, fromBlob })
-          : searchSymbols(repo, task, { vec: qv, limit: Math.max(limit * 4, 20), similarity, fromBlob });
+          ? searchWorkspace(repo, task, { vec: qv, limit: Math.max(limit * 4, 20), similarity, fromBlob, alsoTry })
+          : searchSymbols(repo, task, { vec: qv, limit: Math.max(limit * 4, 20), similarity, fromBlob, alsoTry });
         const ordered = rerank ? (await rerankSymbols(task, wide)) ?? wide : wide;
         const hits = ordered.slice(0, limit);
         if (hits.length) return hits.map((h) => g.nodes.get(h.id) ?? h);

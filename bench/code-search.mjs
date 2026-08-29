@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 import { searchSymbols, isIndexed, graphFromDb } from "../lib/graphdb.mjs";
 import { findSymbols } from "../lib/graph.mjs";
 import { embed, similarity, fromBlob, embeddingsInstalled } from "../lib/embed.mjs";
-import { rerankSymbols } from "../lib/llm.mjs";
+import { rerankSymbols, expandQuery } from "../lib/llm.mjs";
 import { modelInstalled } from "../lib/services.mjs";
 
 const PKG = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -127,9 +127,18 @@ async function tiers(title, cases) {
   if (!modelInstalled()) {
     console.log("  + local rerank            skipped — no local model installed");
   } else {
+    // Does guessing the code's vocabulary beat asking in the user's?
+    out.expanded = await run("  + guessed vocabulary", async (q) => {
+      const [qv] = (await embed(q, { query: true })) ?? [];
+      const alsoTry = await expandQuery(q);
+      return searchSymbols(REPO, q, { vec: qv, limit: 5, similarity, fromBlob, expand: true, alsoTry });
+    }, cases);
+
+    // Cumulative, like every tier above it: the last row is everything on.
     out.reranked = await run("  + local rerank", async (q) => {
       const [qv] = (await embed(q, { query: true })) ?? [];
-      const wide = searchSymbols(REPO, q, { vec: qv, limit: 20, similarity, fromBlob, expand: true });
+      const alsoTry = await expandQuery(q);
+      const wide = searchSymbols(REPO, q, { vec: qv, limit: 20, similarity, fromBlob, expand: true, alsoTry });
       return (await rerankSymbols(q, wide)) ?? wide;
     }, cases);
   }

@@ -43,8 +43,8 @@ what each one is actually worth. Everything structural works with neither.
 | Grepping for what a diff affects | The symbols it touched and everything calling them | **96% smaller** | same | same |
 | Reading the files around a function | The symbols that bear on the task, their callers, their current source | **98% smaller** | same size | same size |
 | Finding code by the words the code itself uses | The right symbol first | **10 of 12** | **11 of 12** | 11 of 12 |
-| Finding code by intent, sharing no word with the answer | The right symbol in the top five | **0 of 12** | 3 of 12 | **4 of 12** |
-| …and in the top three | Less to read before you find it | 0 of 12 | 3 of 12 | **3 of 12** |
+| Finding code by intent, sharing no word with the answer | The right symbol in the top five | **0 of 12** | 3 of 12 | **5 of 12** |
+| …and in the top three | Less to read before you find it | 0 of 12 | 3 of 12 | **5 of 12** |
 | Choosing which model runs a task | Sized locally first, with the reason shown | — | — | **8 of 9, none too weak** |
 | Recalling what you decided months ago | The facts that bear on it | by keyword | **by meaning** | by meaning |
 | Reading a long log to summarise it | A digest, made locally | — | — | **91% smaller** |
@@ -71,11 +71,20 @@ all, and most of the rest share one generic term.
 It is the difference between searching by name and searching by description. It
 does the same for memory, which falls back to keyword search without it.
 
-**The local model is barely a retrieval upgrade.** It moves answers up the list
-rather than finding more of them — top-five goes from three of twelve to four —
-and on vocabulary questions it is very slightly worse than leaving it out. What
-it genuinely adds is elsewhere: digest, naming the neighbourhoods in a graph,
-proposing facts at the end of a session, and **sizing a task before it runs**.
+**The local model earns its place on intent questions.** It does two things
+there. It guesses the vocabulary the code probably uses — "where does a work
+item's history get written" becomes `eventLog`, `auditTrail`, `changeRecord`,
+which is how the search reaches `addEvent` through a word nobody typed — and
+then it re-ranks what comes back. Together they take the top five from three of
+twelve to five, and the top three from three to five, which is the number that
+decides how much you read before you find it. On vocabulary questions it
+changes nothing, because there was nothing to fix.
+
+That costs about ten seconds a question on a CPU and about two with a GPU,
+which is the trade this project exists to make: local seconds instead of
+frontier tokens. What it genuinely adds beyond retrieval: digest, naming the
+neighbourhoods in a graph, proposing facts at the end of a session, and
+**sizing a task before it runs**.
 
 That last one is the reason to install it. Given a task, it says how hard the
 task is and therefore which model should answer it — a rename does not need
