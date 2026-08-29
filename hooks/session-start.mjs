@@ -75,6 +75,31 @@ try {
     if (said.length) driftHint = "\n" + said.join("\n");
   } catch {}
 
+  /**
+   * The check command this project actually has, named rather than described.
+   *
+   * The directives have told every session to use run_check instead of a shell
+   * since the day they were written, and the usage log says run_check has never
+   * once been called — while `npm test` went through Bash more than a dozen
+   * times in two days, at thirty thousand characters a run against the five
+   * hundred run_check returns.
+   *
+   * A rule that has been ignored that consistently is not being disobeyed, it
+   * is being skipped: acting on it means stopping to work out what this
+   * project's check even is, and a shell command is already in mind. So the
+   * hint arrives with the command in it, and the decision is which tool to
+   * hand it to rather than what to run.
+   */
+  let checkHint = "";
+  try {
+    const { detectChecks } = await import("../lib/gates.mjs");
+    const found = detectChecks(process.env.CLAUDE_PROJECT_DIR ?? process.cwd());
+    if (found.length) {
+      checkHint = `
+- Checks here: ${found.map((c) => `\`${c.command}\``).join(", ")}. Give that to \`run_check\` rather than a shell — you get the exit code and the failing lines, and the log never enters this conversation.`;
+    }
+  } catch {}
+
   const lines = [
     "[amalgam] Local offload stack is wired into this session via the MCP server \"amalgam\".",
     "Spend local compute, not context tokens. Services start themselves on first use; never substitute cloud services.",
@@ -91,7 +116,7 @@ try {
   }
   // Static directives first, then everything that varies by session — see the
   // note at the top of this file about why the order is load-bearing.
-  process.stdout.write(lines.join("\n") + pendingHint + reclaimHint + driftHint + "\n");
+  process.stdout.write(lines.join("\n") + checkHint + pendingHint + reclaimHint + driftHint + "\n");
 } catch {
   // never block session start
 }
