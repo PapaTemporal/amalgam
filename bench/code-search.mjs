@@ -16,9 +16,8 @@
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { searchSymbols, isIndexed } from "../lib/graphdb.mjs";
+import { searchSymbols, isIndexed, graphFromDb } from "../lib/graphdb.mjs";
 import { findSymbols } from "../lib/graph.mjs";
-import { loadGraph } from "../lib/graph.mjs";
 import { embed, similarity, fromBlob, embeddingsInstalled } from "../lib/embed.mjs";
 import { rerankSymbols } from "../lib/llm.mjs";
 import { modelInstalled } from "../lib/services.mjs";
@@ -68,7 +67,14 @@ if (!isIndexed(REPO)) {
   console.error(`${REPO} is not indexed. Run: amalgam graph`);
   process.exit(1);
 }
-const g = loadGraph(REPO);
+// The index is the only place a graph is read from: graph.json is consumed by
+// importGraph and removed, so a bench that loads the document measures nothing
+// on a repository built after that change.
+const g = graphFromDb(REPO);
+if (!g) {
+  console.error(`${REPO} is not indexed. Run: amalgam graph`);
+  process.exit(1);
+}
 const withVectors = embeddingsInstalled();
 
 const rankOf = (hits, want) => {
@@ -78,10 +84,16 @@ const rankOf = (hits, want) => {
 
 async function run(label, search, cases = CASES) {
   const ranks = [];
+  const started = Date.now();
   for (const [q, want] of cases) ranks.push(rankOf(await search(q), want));
+  // What the tier costs, not only what it finds. A configuration that answers
+  // one more question and takes four seconds longer per question is a
+  // different trade from one that does it for free, and the table cannot say
+  // which without this.
+  const per = (Date.now() - started) / cases.length / 1000;
   const at = (n) => ranks.filter((r) => r <= n).length;
   const mrr = ranks.reduce((s, r) => s + (r === Infinity ? 0 : 1 / r), 0) / ranks.length;
-  console.log(`${label.padEnd(32)} hit@1 ${at(1)}/${cases.length}   hit@3 ${at(3)}/${cases.length}   hit@5 ${at(5)}/${cases.length}   MRR ${mrr.toFixed(3)}`);
+  console.log(`${label.padEnd(28)} hit@1 ${at(1)}/${cases.length}   hit@3 ${at(3)}/${cases.length}   hit@5 ${at(5)}/${cases.length}   MRR ${mrr.toFixed(3)}   ${per < 0.05 ? "     " : per.toFixed(2) + "s"}/q`);
   return ranks;
 }
 

@@ -500,7 +500,7 @@ async function cmdStart() {
  * place all of them agree to look.
  */
 async function cmdGpu(args) {
-  const { GPU_FILE, gpuEnabled, deviceArgs, llamaServerPath } = await import("../lib/services.mjs");
+  const { GPU_FILE, gpuEnabled, gpuCapable, deviceArgs, llamaServerPath } = await import("../lib/services.mjs");
   const want = args.find((a) => !a.startsWith("--"));
 
   if (want === "on" || want === "off") {
@@ -508,8 +508,19 @@ async function cmdGpu(args) {
     fs.writeFileSync(GPU_FILE, JSON.stringify({ enabled: want === "on" }, null, 2) + "\n");
     console.log(`GPU offload ${want === "on" ? "enabled" : "disabled"} -> ${GPU_FILE}`);
     if (want === "on") {
-      console.log("Restart any running server for this to take effect:  amalgam stop");
-      console.log("This is an exception, not the default — see docs/constraints.md.");
+      // Saying "enabled" and then running on the CPU anyway is the failure this
+      // check exists to prevent. The setting is still written — it is a
+      // preference, and it will apply the moment a capable runtime is here.
+      if (!gpuCapable()) {
+        console.log("");
+        console.log("But the runtime installed here has no GPU backend, so nothing will offload.");
+        console.log("The published Windows build is llama.cpp's CPU-only package: every library");
+        console.log("beside it is a CPU one. Your preference is saved and will apply as soon as a");
+        console.log("build that can reach a GPU is installed.");
+      } else {
+        console.log("Restart any running server for this to take effect:  amalgam stop");
+        console.log("This is an exception, not the default — see docs/constraints.md.");
+      }
     }
     return;
   }
@@ -518,7 +529,12 @@ async function cmdGpu(args) {
     process.exit(1);
   }
 
-  console.log(`GPU offload : ${gpuEnabled() ? "ENABLED (opt-in)" : "off (default)"}`);
+  const asked = gpuEnabled();
+  const able = gpuCapable();
+  console.log(`GPU offload : ${asked ? (able ? "ENABLED (opt-in)" : "asked for, but this runtime cannot") : "off (default)"}`);
+  if (asked && !able) {
+    console.log("  runtime   : CPU-only build — no Vulkan, CUDA or HIP library beside the server");
+  }
   console.log(`  setting   : ${fs.existsSync(GPU_FILE) ? GPU_FILE : "not set — defaults to off"}`);
   if (process.env.AMALGAM_GPU) console.log(`  override  : AMALGAM_GPU=${process.env.AMALGAM_GPU} (this run only)`);
   console.log(`  launch    : llama-server ... ${deviceArgs().join(" ")}`);

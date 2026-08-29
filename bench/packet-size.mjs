@@ -12,7 +12,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { loadGraph, sliceSymbol, callersOf, calleesOf } from "../lib/graph.mjs";
+import { sliceSymbol, callersOf, calleesOf } from "../lib/graph.mjs";
 import { graphFromDb, isIndexed, searchSymbols } from "../lib/graphdb.mjs";
 import { embed, similarity, fromBlob, embeddingsInstalled } from "../lib/embed.mjs";
 import { rerankSymbols } from "../lib/llm.mjs";
@@ -22,7 +22,8 @@ const REPO = path.resolve(process.argv[2] ?? ".");
 const TASK = process.argv[3] ?? "where does the score get written to a file";
 const LIMIT = Number(process.argv[4] ?? 5);
 
-const g = isIndexed(REPO) ? graphFromDb(REPO) : loadGraph(REPO);
+// One reader, because there is one place a graph lives now.
+const g = graphFromDb(REPO);
 if (!g) { console.error(`${REPO} has no graph. Run: amalgam graph`); process.exit(1); }
 
 /** The same selection code_context uses, minus the MCP plumbing. */

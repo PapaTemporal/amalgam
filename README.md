@@ -85,6 +85,27 @@ the work, which is the direction that would actually cost you something. It is
 off by default, shown with its reason before every run, and one click overrides
 it; see **[model routing](docs/models.md)**.
 
+**A GPU makes the local model faster, and nothing else.** It is the fourth
+optional step and the only one that changes no answers. Measured on this
+machine — an RTX 3080, the same llama.cpp build, the same questions, both
+servers warm:
+
+| Re-ranking, per question | CPU only | With the GPU |
+|---|---|---|
+| asked by intent | 0.87s | **0.20s** |
+| asked in the code's own words | 0.82s | **0.18s** |
+
+About four and a half times faster, with the same symbols found — the hit
+counts are identical within the variation between two runs of the same
+configuration. So it buys latency on digest, re-ranking, task sizing and
+session capture, and buys nothing at all on a machine that never installed the
+local model in the first place.
+
+Off by default, and it stays off until somebody turns it on: `amalgam gpu on`.
+The rule was never that this must avoid a GPU, it was that it must work on a
+machine that has none — an ESXi guest, a VDI session — and those two only look
+alike until somebody runs it on a workstation.
+
 ### What it was measured against
 
 Two codebases, because a saving measured on a small one proves very little.
