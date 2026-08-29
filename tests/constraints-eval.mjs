@@ -25,7 +25,20 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PKG = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const read = (rel) => fs.readFileSync(path.join(PKG, rel), "utf8");
+/**
+ * Source, with line endings normalised.
+ *
+ * git checks these files out with CRLF on Windows, and several rules below
+ * find a function body by slicing between newline-anchored markers. A pattern
+ * written as "\n}\n" simply does not appear in a CRLF file: indexOf returns
+ * -1, the slice that follows it returns two characters, and the rule reports a
+ * violation that exists only on one platform.
+ *
+ * Which is the failure this whole file was added to prevent, arrived at from
+ * the other direction — a check that assumes the platform it was written on.
+ */
+const read = (rel) =>
+  fs.readFileSync(path.join(PKG, rel), "utf8").replace(/\r\n/g, "\n");
 /** Source with comments removed — a rule is about what runs, not what is explained. */
 const code = (rel) => read(rel).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
