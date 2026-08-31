@@ -341,10 +341,10 @@
           <text class="t" x="710" y="217">log the conversation</text>
           <rect class="bx-l" x="700" y="240" width="212" height="34" rx="2"/>
           <text class="t" x="710" y="261">propose what it learned</text>
-          <rect class="bx-l" x="700" y="284" width="212" height="34" rx="2"/>
-          <text class="t" x="710" y="305">rebuild stale graphs</text>
-          <text class="t-sm" x="700" y="336">the hook returns in 245ms;</text>
-          <text class="t-sm" x="700" y="352">the rest runs detached</text>
+          <text class="t-sm" x="700" y="300">the hook returns in 245ms;</text>
+          <text class="t-sm" x="700" y="316">the rest runs detached</text>
+          <text class="t-sm" x="700" y="344">nothing rebuilds a graph</text>
+          <text class="t-sm" x="700" y="360">unless a person asks</text>
           <text class="t-wi" x="700" y="82">nothing crosses</text>
           <text class="t-sm" x="700" y="98">the session is over</text>
         </svg>
@@ -360,9 +360,9 @@
   <section>
     <div class="phase-head"><span class="num">1</span><h2>The session opens by reconciling</h2></div>
     <p>
-      A session ends by writing down what it learned and rebuilding what fell behind. That covers
-      everything <em>that</em> session did, and nothing that happened between sessions — a pull, a
-      branch switch, work on another machine, an editor open in another window.
+      A session ends by writing down what it learned. That covers everything <em>that</em> session
+      did, and nothing that happened between sessions — a pull, a branch switch, work on another
+      machine, an editor open in another window.
     </p>
     <p>
       Those land on the state an agent trusts most. A stale index does not answer more slowly; it
@@ -392,8 +392,8 @@
           <text class="t-hd" x="0" y="14">THE CHEAP QUESTION FIRST</text>
 
           <rect class="bx" x="0" y="34" width="176" height="46" rx="2"/>
-          <text class="t" x="12" y="53">graph.json tail</text>
-          <text class="t-sm" x="12" y="70">built_at_commit</text>
+          <text class="t" x="12" y="53">the index</text>
+          <text class="t-sm" x="12" y="70">its build commit</text>
 
           <rect class="bx" x="0" y="98" width="176" height="46" rx="2"/>
           <text class="t" x="12" y="117">.git/HEAD on disk</text>
@@ -473,7 +473,7 @@
     <figure>
       <div class="scroll">
         <svg class="fig" viewBox="0 0 920 428" role="img"
-             aria-label="A task is turned into symbols by one of three selection paths depending on what is installed, then each symbol's current source is read from the working tree, producing a packet far smaller than the files it replaced.">
+             aria-label="A task is turned into symbols by one of three selection paths depending on what is installed, the two rankings merged by position rather than by score, then each symbol's current source is read from the working tree, producing a packet far smaller than the files it replaced.">
           <defs>
             <marker id="an3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
               <path class="mk-n" d="M0 0 L10 5 L0 10 z"/>
@@ -499,7 +499,7 @@
           <rect class="bx" x="216" y="14" width="392" height="128" rx="2"/>
 
           <rect class="bx-l" x="230" y="26" width="364" height="32" rx="2"/>
-          <text class="t" x="240" y="46">both models — meaning, then a local re-rank</text>
+          <text class="t" x="240" y="46">both models: guess its words, meaning, re-rank</text>
           <rect class="bx-l" x="230" y="64" width="364" height="32" rx="2"/>
           <text class="t" x="240" y="84">embeddings only — meaning, plus graph neighbours</text>
           <rect class="bx-l" x="230" y="102" width="364" height="28" rx="2"/>
@@ -555,6 +555,12 @@
         changes: whatever picked the symbols, their text is read from the working tree at the moment
         of asking. The counterfactual is recorded rather than estimated — the tool knows which files
         it spared you.
+
+        <br><br>Meaning and words are merged by <em>position</em>, not by score: cosine over short code
+        text bunches into a band two hundredths wide while a word score is an unbounded sum, so only
+        rank is a common unit. With both models installed the local one first guesses the vocabulary
+        the code probably uses — which is how "where does a work item's history get written" reaches
+        <code>addEvent</code> through the word "event", that nobody typed.
       </figcaption>
     </figure>
 
@@ -566,7 +572,7 @@
         </thead>
         <tbody>
           <tr><td>in the code's own words</td><td>10 of 12 first</td><td>11 of 12</td><td>11 of 12</td></tr>
-          <tr><td>by intent, sharing no word</td><td>0 of 12</td><td>3 of 12 in top five</td><td>4 of 12</td></tr>
+          <tr><td>by intent, sharing no word</td><td>0 of 12</td><td>3 of 12 in top five</td><td>5 of 12</td></tr>
         </tbody>
       </table>
     </div>
@@ -582,14 +588,19 @@
     <div class="phase-head"><span class="num">3</span><h2>The session ends without making you wait</h2></div>
     <p>
       A hook runs while you are waiting for your prompt back, so the rule is strict: the cheap half
-      happens now, the expensive halves are handed to detached children and forgotten about.
-      Nothing here can delay a session ending, and nothing it fails at can prevent one.
+      happens now, and the expensive half — asking the local model what was durable about the
+      session — is handed to a detached child and forgotten about. Nothing here can delay a session
+      ending, and nothing it fails at can prevent one.
+
+      There used to be a second child that rebuilt graphs which had fallen behind. It is gone, and
+      the reason is worth keeping: it was two hundred lines approximating on a schedule a freshness
+      the query path already reports directly.
     </p>
 
     <figure>
       <div class="scroll">
         <svg class="fig" viewBox="0 0 920 372" role="img"
-             aria-label="The session end hook logs the conversation inline and returns in 245 milliseconds, then two detached children run: one proposing facts, one refreshing stale graphs behind five gates.">
+             aria-label="The session end hook logs the conversation inline and returns in 245 milliseconds, then one detached child asks the local model what was durable about the session. Nothing rebuilds a graph on its own.">
           <defs>
             <marker id="an4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
               <path class="mk-n" d="M0 0 L10 5 L0 10 z"/>
@@ -644,41 +655,29 @@
           <text class="t-sm" x="752" y="161">never auto-accepted</text>
 
           <!-- child two -->
-          <text class="t-hd" x="0" y="216">DETACHED · WHAT FELL BEHIND</text>
-          <rect class="bx" x="0" y="230" width="200" height="40" rx="2"/>
-          <text class="t" x="12" y="249">every registered repo</text>
-          <text class="t-sm" x="12" y="265">deduplicated first</text>
-          <path class="ln" d="M200 250 L246 250" marker-end="url(#an4)"/>
+          <text class="t-hd" x="0" y="216">WHAT DOES NOT HAPPEN HERE</text>
+          <rect class="bx-s" x="0" y="230" width="330" height="58" rx="2"/>
+          <text class="t-st" x="12" y="250">no graph is rebuilt on its own</text>
+          <text class="t-sm" x="12" y="268">there was a scheduler; it was removed</text>
 
-          <rect class="bx-s" x="248" y="212" width="272" height="76" rx="2"/>
-          <text class="t-st" x="260" y="230">five gates, any one refuses</text>
-          <text class="t-sm" x="260" y="248">no graph · already current</text>
-          <text class="t-sm" x="260" y="264">never timed here · over 90s</text>
-          <text class="t-sm" x="260" y="280">built within the last 30 min</text>
+          <text class="t-sm" x="360" y="240">It decided, from a per-machine timing record and a cooldown,</text>
+          <text class="t-sm" x="360" y="256">whether to rebuild inside a budget — 201 lines approximating on</text>
+          <text class="t-sm" x="360" y="272">a schedule a freshness the query path simply reports.</text>
 
-          <path class="ln-l" d="M520 250 L566 250" marker-end="url(#al4)"/>
-          <rect class="bx-l" x="568" y="230" width="164" height="40" rx="2"/>
-          <text class="t" x="580" y="249">rebuild and re-index</text>
-          <text class="t-sm" x="580" y="265">one transaction</text>
+          <text class="t-sm" x="360" y="300">And report it does: code_context reads current source from disk,</text>
+          <text class="t-sm" x="360" y="316">names the files the graph predates, and says when a symbol has</text>
+          <text class="t-sm" x="360" y="332">moved or gone. Staleness costs precision, never correctness — which</text>
+          <text class="t-sm" x="360" y="348">makes scheduled rebuilding a convenience, and an expensive one.</text>
 
-          <path class="ln-l" d="M732 250 L778 250" marker-end="url(#al4)"/>
-          <rect class="bx-l" x="780" y="230" width="140" height="40" rx="2"/>
-          <text class="t" x="792" y="249">write down</text>
-          <text class="t" x="792" y="265">that it ran</text>
-
-          <text class="t-sm" x="568" y="312">Because a detached child whose output is</text>
-          <text class="t-sm" x="568" y="328">discarded looks exactly like one that</text>
-          <text class="t-sm" x="568" y="344">never started at all.</text>
-          <text class="t-sm" x="0" y="312">"Never timed here" is the cold start: build costs are</text>
-          <text class="t-sm" x="0" y="328">recorded per machine, so a repository set up elsewhere</text>
-          <text class="t-sm" x="0" y="344">arrives with a graph and no idea what a rebuild costs.</text>
-          <text class="t-sm" x="0" y="360">One build by hand clears it, and it self-maintains after.</text>
+          <text class="t-sm" x="12" y="312">What is left is `amalgam graph`,</text>
+          <text class="t-sm" x="12" y="328">which every one of those paths</text>
+          <text class="t-sm" x="12" y="344">called anyway — and the Rebuild</text>
+          <text class="t-sm" x="12" y="360">button, which is a person asking.</text>
         </svg>
       </div>
       <figcaption>
-        Two independent children, because a graph going stale has nothing to do with whether
-        conversations are being kept. The gates exist so that ending three sessions in an hour does
-        not mean three rebuilds of the same repository.
+        One child, and a deliberate absence beside it. Reporting drift happens always; acting on it
+        without being asked happens never — the distinction that survived deleting the scheduler.
       </figcaption>
     </figure>
   </section>
