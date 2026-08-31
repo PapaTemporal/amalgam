@@ -659,6 +659,22 @@ function backupOnce(file) {
   } catch {}
 }
 
+/**
+ * amalgam's own skills, by looking rather than by remembering.
+ *
+ * This was the same three names hardcoded in three places, so adding a fourth
+ * skill shipped it to nobody, and the success message named a set that was no
+ * longer the set. A directory listing cannot drift.
+ */
+function amalgamSkills() {
+  try {
+    return fs.readdirSync(path.join(HOME, "skills"), { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .sort();
+  } catch { return []; }
+}
+
 /** Install amalgam's skills, hook, and MCP server for every project at once. */
 function wireUser() {
   const serverPath = path.join(HOME, "mcp", "server.mjs");
@@ -667,10 +683,10 @@ function wireUser() {
     process.exit(1);
   }
 
-  for (const s of ["offload", "caveman", "start"]) {
+  for (const s of amalgamSkills()) {
     copyDir(path.join(HOME, "skills", s), path.join(USER_SKILLS_DIR, s));
   }
-  console.log(`Skills -> ${USER_SKILLS_DIR} (offload, caveman, start)`);
+  console.log(`Skills -> ${USER_SKILLS_DIR} (${amalgamSkills().join(", ")})`);
 
   // Two hooks, same shape: one injects the offload directives as a session
   // begins, the other records what the session learned as it ends.
@@ -768,7 +784,7 @@ function cmdWire(args) {
       o.mcpServers ??= {};
       o.mcpServers.amalgam = { command: NODE, args: [serverPath] };
     });
-    for (const s of ["offload", "caveman", "start"]) {
+    for (const s of amalgamSkills()) {
       copyDir(path.join(HOME, "skills", s), path.join(proj, ".claude", "skills", s));
     }
     // SessionStart hook: injects the offload directives as context.
@@ -798,9 +814,9 @@ function cmdWire(args) {
           if (!already) o.hooks[event].push({ hooks: [{ type: "command", command: want }] });
         }
       });
-      console.log("Claude Code wired: .mcp.json + .claude/skills/{offload,caveman,start} + SessionStart hook");
+      console.log(`Claude Code wired: .mcp.json + .claude/skills/{${amalgamSkills().join(",")}} + SessionStart hook`);
     } else {
-      console.log("Claude Code wired: .mcp.json + .claude/skills/{offload,caveman,start}");
+      console.log(`Claude Code wired: .mcp.json + .claude/skills/{${amalgamSkills().join(",")}}`);
       console.log("  (no hook installed — run 'amalgam install' to refresh the code payload)");
     }
   }
@@ -1168,7 +1184,7 @@ async function cmdUpdate(args) {
   for (const proj of w.projects) {
     if (!fs.existsSync(proj)) continue;
     console.log(`\nRefreshing project wiring: ${proj}`);
-    for (const s of ["offload", "caveman", "start"]) {
+    for (const s of amalgamSkills()) {
       copyDir(path.join(HOME, "skills", s), path.join(proj, ".claude", "skills", s));
     }
   }
@@ -1222,6 +1238,22 @@ async function closeWhatItCan(args = []) {
   if (flags.length) {
     console.log(`\nMost of that is one command:  amalgam update ${flags.join(" ")}`);
   }
+}
+
+// ========================================================== checkpoint
+/**
+ * What starting over would cost.
+ *
+ * The one question nothing here could answer. Every other command reduces what
+ * a call adds to a conversation; none of them shortens the conversation, and
+ * the only thing that does is a session boundary. This says what is on the
+ * other side of one.
+ */
+async function cmdCheckpoint(args) {
+  const { parseArgs: _pa } = { parseArgs: null };
+  const dir = args.find((a) => !a.startsWith("--")) ?? process.cwd();
+  const { restorePoint, renderRestorePoint } = await import("../lib/checkpoint.mjs");
+  console.log(renderRestorePoint(await restorePoint(path.resolve(dir))));
 }
 
 // ============================================================ transfer
@@ -2168,6 +2200,7 @@ switch (cmd) {
   case "vendor-graph": await cmdVendorGraph(); break;
   case "diagram": await cmdDiagram(rest); break;
   case "transfer": await cmdTransfer(rest); break;
+  case "checkpoint": await cmdCheckpoint(rest); break;
   default:
     // Distinguish "you typed a command I don't know" from "I received nothing
     // at all". The second usually means a shell wrapper ate the arguments,
@@ -2231,6 +2264,9 @@ Usage:
                                     (avoids alias pitfalls entirely)
   amalgam brief [repo]              where things stand: git, streams, BMAD
                                     artifacts, graph, services
+  amalgam checkpoint [repo]         what a FRESH session would start with, what
+                                    it costs, and how far behind it has fallen
+                                    — the other half of deciding to start over
   amalgam graph [--check] [--all]   build/refresh code graphs: every service in
                  [--directory <p>]  a workspace, or just the current repo.
                                     --directory/<path> targets one exactly,
